@@ -1,3 +1,4 @@
 videos/*
 
 _metadata
+_metadata\generated_indexed_rulesets\*

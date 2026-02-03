@@ -1,18 +1,7 @@
 // background.js
 
-importScripts('videos.js');
-
-function setRandomVideo() {
-  const randomVideo = getRandomVideoPath();
-  console.log('Random video selected:', randomVideo);
-  chrome.storage.local.set({ selectedVideo: randomVideo }, () => {
-    console.log('Selected video saved to storage');
-  });
-}
-
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Extension installed');
-  setRandomVideo();
+  console.log("Extension installed");
   chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: [2, 3, 4],
     addRules: [
@@ -62,17 +51,8 @@ chrome.runtime.onInstalled.addListener(() => {
       }
     ]
   });
-  console.log('Dynamic rules updated');
+  console.log("Dynamic rules updated");
 });
-
-chrome.webNavigation.onCommitted.addListener((details) => {
-  console.log('onCommitted triggered for URL:', details.url);
-  if (details.url.includes('video.html')) {
-    setRandomVideo();
-  }
-});
-
-
 
 
 
