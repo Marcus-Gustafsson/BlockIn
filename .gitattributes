@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+videos/** -text
+_metadata/** -text

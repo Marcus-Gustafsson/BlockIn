@@ -1,61 +1,29 @@
 // background.js
 
+importScripts("blocked-sites.js");
+
+function buildRedirectRule(site) {
+  return {
+    id: site.id,
+    priority: 1,
+    action: {
+      type: "redirect",
+      redirect: {
+        extensionPath: "/video.html"
+      }
+    },
+    condition: {
+      urlFilter: site.urlFilter,
+      resourceTypes: site.resourceTypes || ["main_frame"]
+    }
+  };
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Extension installed");
   chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: [2, 3, 4],
-    addRules: [
-      {
-        id: 2,
-        priority: 1,
-        action: {
-          type: "redirect",
-          redirect: {
-            extensionPath: "/video.html"
-          }
-        },
-        condition: {
-          urlFilter: "*://*.facebook.com/*",
-          resourceTypes: ["main_frame"]
-        }
-      }
-      ,
-      {
-        id: 3,
-        priority: 1,
-        action: {
-          type: "redirect",
-          redirect: {
-            extensionPath: "/video.html"
-          }
-        },
-        condition: {
-          urlFilter: "*://*.instagram.com/*",
-          resourceTypes: ["main_frame"]
-        }
-      }
-      ,
-      {
-        id: 4,
-        priority: 1,
-        action: {
-          type: "redirect",
-          redirect: {
-            extensionPath: "/video.html"
-          }
-        },
-        condition: {
-          urlFilter: "*://*.twitch.tv/*",
-          resourceTypes: ["main_frame"]
-        }
-      }
-    ]
+    removeRuleIds: BLOCKED_SITES.map((site) => site.id),
+    addRules: BLOCKED_SITES.map(buildRedirectRule)
   });
   console.log("Dynamic rules updated");
 });
-
-
-
-
-
-
