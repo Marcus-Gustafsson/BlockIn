@@ -12,3 +12,10 @@ self.BLOCKED_SITE_SEEDS = [
     domain: "twitch.tv"
   }
 ];
+
+self.ALLOWED_PATH_SEEDS = [
+  {
+    id: 5,
+    pattern: "facebook.com/messages/*"
+  }
+];

@@ -68,19 +68,31 @@
       color: #666;
       padding-top: 10px;
     }
+
+    .section-title {
+      font-size: 15px;
+      margin: 16px 0 8px;
+    }
   </style>
 </head>
 <body>
   <h1>bLockIn</h1>
   <p>Manage sites that redirect to motivation videos.</p>
+  <p id="status" class="status" role="status"></p>
 
+  <h2 class="section-title">Blocked Sites</h2>
   <form id="add-site-form">
     <input id="site-domain" type="text" placeholder="youtube.com" autocomplete="off">
     <button type="submit">Add</button>
   </form>
-
-  <p id="status" class="status" role="status"></p>
   <ul id="blocked-sites"></ul>
+
+  <h2 class="section-title">Allowed Paths</h2>
+  <form id="add-allowed-path-form">
+    <input id="allowed-path" type="text" placeholder="facebook.com/messages/*" autocomplete="off">
+    <button type="submit">Allow</button>
+  </form>
+  <ul id="allowed-paths"></ul>
 
   <script src="popup.js"></script>
 </body>

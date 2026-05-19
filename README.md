@@ -53,6 +53,20 @@ To remove a site:
 2. Confirm that you want to remove it.
 3. Type the exact domain in the second popup.
 
+## Allowed Paths
+
+Allowed paths are exceptions inside blocked domains. BlockIn seeds this allowed path so Facebook Messenger can still be used while Facebook stays blocked:
+
+- `facebook.com/messages/*`
+
+To add another allowed path:
+
+1. Click the bLockIn extension icon.
+2. Enter a domain path, such as `facebook.com/messages/*`.
+3. Click `Allow`.
+
+You can also paste a full Facebook Messenger chat URL. BlockIn stores it as `facebook.com/messages/*` so changing chat identifiers do not break the exception.
+
 ## Local Videos
 
 Put personal video files in the `videos/` folder. The folder is ignored by git, so local videos stay out of commits.
@@ -75,8 +89,9 @@ See `manual_test_checklist.md` for the fuller checklist.
 3. Visit `https://www.facebook.com/`, `https://www.instagram.com/`, or `https://www.twitch.tv/`.
 4. Confirm the tab redirects to the extension `video.html` page.
 5. Add and remove a test domain from the popup, such as `youtube.com`.
-6. Confirm a random video loads and plays from `videos/`.
-7. Check the extension service worker console and redirected page console for errors.
+6. Confirm `https://www.facebook.com/messages/` does not redirect.
+7. Confirm a random video loads and plays from `videos/`.
+8. Check the extension service worker console and redirected page console for errors.
 
 ## Development Notes
 

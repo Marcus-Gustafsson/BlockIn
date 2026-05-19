@@ -8,3 +8,4 @@ Format: `YYYY-MM-DD - One sentence summary.`
 2026-05-19 - Cleaned extension structure and improved redirect rule syncing plus video error feedback before new roadmap features.
 2026-05-19 - Expanded the README with a beginner-friendly Brave install and reload guide for local extension testing.
 2026-05-19 - Added popup-managed blocked-site storage with add/remove controls and two-step removal confirmation.
+2026-05-19 - Added allowed-path exceptions with a seeded Facebook Messenger allow rule inside the blocked Facebook domain.

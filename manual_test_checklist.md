@@ -20,6 +20,7 @@ Use this after changes that affect blocking, videos, popup behavior, or permissi
 
 - Open the extension popup.
 - Confirm `facebook.com`, `instagram.com`, and `twitch.tv` appear after first install or storage reset.
+- Confirm `facebook.com/messages/*` appears as an allowed path after first install or storage reset.
 - Add `youtube.com` and confirm it appears in the list.
 - Visit `https://www.youtube.com/` and confirm it redirects to the extension `video.html` page.
 - Try adding duplicate `youtube.com` and confirm no duplicate site appears.
@@ -28,6 +29,8 @@ Use this after changes that affect blocking, videos, popup behavior, or permissi
 - Confirm `youtube.com` is removed only after the exact two-step removal flow.
 - Visit `https://www.youtube.com/` and confirm it no longer redirects.
 - Remove a seeded site, reload Brave, and confirm the removal persists.
+- Paste `https://www.facebook.com/messages/e2ee/t/7291377720941268/#` as an allowed path and confirm it stores as `facebook.com/messages/*`.
+- Visit `https://www.facebook.com/messages/` and confirm it does not redirect while `https://www.facebook.com/` still redirects.
 
 ## Videos
 
