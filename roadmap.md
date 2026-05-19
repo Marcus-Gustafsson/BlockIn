@@ -13,11 +13,10 @@ Status markers: `Planned`, `In Progress`, `Done`, `Blocked`.
 - `Done` - Added a manual test checklist for extension reload, redirects, video playback, fallback UI, and console checks.
 - `Done` - Added popup controls to add and remove blocked sites from local storage with a two-step removal guard.
 - `Done` - Added allowed-path exceptions for blocked domains, including Facebook Messenger.
+- `Done` - Added popup-managed blocked paths for sub-path blocking without blocking the full domain.
+- `Done` - Added timed access flow for mixed-use sites with Work/Procrastination choice and expiring Work sessions.
 
 ## Next
-
-- `Planned` - Support path-specific blocking so a sub-path such as `youtube.com/shorts` or `youtube.com/reels` can be blocked without blocking all of YouTube.
-- `Planned` - Add timed access flow for mixed-use sites: show Work/Procrastination choice, allow temporary access after Work, then ask again after the timer expires.
 
 ## Later
 

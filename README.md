@@ -45,7 +45,7 @@ To add a site:
 2. Enter a domain only, such as `youtube.com`.
 3. Click `Add`.
 
-URLs and paths such as `https://youtube.com/watch` or `youtube.com/shorts` are intentionally rejected for now. Path-specific blocking is planned separately.
+URLs and paths such as `https://youtube.com/watch` or `youtube.com/shorts` are rejected here. Use Blocked Paths for path-specific blocking.
 
 To remove a site:
 
@@ -66,6 +66,30 @@ To add another allowed path:
 3. Click `Allow`.
 
 You can also paste a full Facebook Messenger chat URL. BlockIn stores it as `facebook.com/messages/*` so changing chat identifiers do not break the exception.
+
+## Blocked Paths
+
+Blocked paths redirect a specific path on a site without blocking the whole domain. They are useful for pages such as `youtube.com/shorts/*` where normal YouTube access may still be needed.
+
+To add a blocked path:
+
+1. Click the bLockIn extension icon.
+2. Enter a domain path, such as `youtube.com/shorts/*`.
+3. Click `Block`.
+
+You can also paste a full URL. BlockIn stores path rules as `domain/path/*` and matches the root domain plus `www`, such as `youtube.com` and `www.youtube.com`.
+
+## Timed Access Sites
+
+Timed access sites show a Work/Procrastination choice before opening a mixed-use domain. Choosing Work gives 15 minutes on the main site and sends the tab to the original URL you were trying to open. If the original URL is a blocked path, BlockIn sends the tab to the domain root instead. Blocked paths on that domain still redirect to motivation videos during the Work timer, including single-page app navigation such as YouTube moving into Shorts without a full page reload.
+
+To add a timed access site:
+
+1. Click the bLockIn extension icon.
+2. Enter a domain or URL, such as `youtube.com` or `https://www.reddit.com/`.
+3. Click `Add` in the Timed Access Sites section.
+
+A domain cannot be both a fully blocked site and a timed access site. Remove it from one list before adding it to the other.
 
 ## Local Videos
 
@@ -89,9 +113,11 @@ See `manual_test_checklist.md` for the fuller checklist.
 3. Visit `https://www.facebook.com/`, `https://www.instagram.com/`, or `https://www.twitch.tv/`.
 4. Confirm the tab redirects to the extension `video.html` page.
 5. Add and remove a test domain from the popup, such as `youtube.com`.
-6. Confirm `https://www.facebook.com/messages/` does not redirect.
-7. Confirm a random video loads and plays from `videos/`.
-8. Check the extension service worker console and redirected page console for errors.
+6. Add `youtube.com/shorts/*` as a blocked path and confirm Shorts redirects while `https://www.youtube.com/` does not redirect unless timed access is configured.
+7. Add `youtube.com` as a timed access site and confirm Work allows `https://www.youtube.com/` for 15 minutes while Shorts still redirects.
+8. Confirm `https://www.facebook.com/messages/` does not redirect.
+9. Confirm a random video loads and plays from `videos/`.
+10. Check the extension service worker console and redirected page console for errors.
 
 ## Development Notes
 

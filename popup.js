@@ -1,14 +1,23 @@
 const STORAGE_BLOCKED_SITES_KEY = "blockedSites";
 const STORAGE_ALLOWED_PATHS_KEY = "allowedPaths";
+const STORAGE_BLOCKED_PATHS_KEY = "blockedPaths";
+const STORAGE_TIMED_ACCESS_SITES_KEY = "timedAccessSites";
 const STORAGE_NEXT_RULE_ID_KEY = "nextBlockedSiteRuleId";
+const DEFAULT_WORK_DURATION_MINUTES = 15;
 
 const siteForm = document.getElementById("add-site-form");
 const allowedPathForm = document.getElementById("add-allowed-path-form");
+const blockedPathForm = document.getElementById("add-blocked-path-form");
+const timedSiteForm = document.getElementById("add-timed-site-form");
 const domainInput = document.getElementById("site-domain");
 const allowedPathInput = document.getElementById("allowed-path");
+const blockedPathInput = document.getElementById("blocked-path");
+const timedSiteInput = document.getElementById("timed-site-domain");
 const statusElement = document.getElementById("status");
 const sitesList = document.getElementById("blocked-sites");
 const allowedPathsList = document.getElementById("allowed-paths");
+const blockedPathsList = document.getElementById("blocked-paths");
+const timedSitesList = document.getElementById("timed-sites");
 
 function normalizeDomain(value) {
   const trimmed = value.trim().toLowerCase();
@@ -31,7 +40,7 @@ function normalizeDomain(value) {
   return hostnamePattern.test(domain) ? domain : null;
 }
 
-function normalizeAllowedPath(value) {
+function normalizePathPattern(value, options = {}) {
   const trimmed = value.trim().toLowerCase();
   if (!trimmed || /\s/.test(trimmed)) {
     return null;
@@ -63,9 +72,15 @@ function normalizeAllowedPath(value) {
   }
 
   const basePath =
-    domain === "facebook.com" && path.startsWith("/messages/")
+    options.collapseFacebookMessages &&
+    domain === "facebook.com" &&
+    path.startsWith("/messages/")
       ? "/messages/"
       : path;
+  if (basePath.includes("*") && !basePath.endsWith("/*")) {
+    return null;
+  }
+
   const normalizedPath = basePath.endsWith("*")
     ? basePath
     : `${basePath.replace(/\/+$/, "")}/*`;
@@ -76,10 +91,38 @@ function normalizeAllowedPath(value) {
     : null;
 }
 
+function normalizeAllowedPath(value) {
+  return normalizePathPattern(value, { collapseFacebookMessages: true });
+}
+
+function normalizeBlockedPath(value) {
+  return normalizePathPattern(value);
+}
+
+function normalizeTimedAccessDomain(value) {
+  const trimmed = value.trim();
+
+  try {
+    if (trimmed.includes("://")) {
+      return normalizeDomain(new URL(trimmed).hostname);
+    }
+  } catch (error) {
+    return null;
+  }
+
+  return normalizeDomain(trimmed);
+}
+
+function makeWorkUrl(domain) {
+  return `https://www.${domain}/`;
+}
+
 async function getStoredState() {
   const stored = await chrome.storage.local.get([
     STORAGE_BLOCKED_SITES_KEY,
     STORAGE_ALLOWED_PATHS_KEY,
+    STORAGE_BLOCKED_PATHS_KEY,
+    STORAGE_TIMED_ACCESS_SITES_KEY,
     STORAGE_NEXT_RULE_ID_KEY
   ]);
   const blockedSites = Array.isArray(stored[STORAGE_BLOCKED_SITES_KEY])
@@ -88,16 +131,26 @@ async function getStoredState() {
   const allowedPaths = Array.isArray(stored[STORAGE_ALLOWED_PATHS_KEY])
     ? stored[STORAGE_ALLOWED_PATHS_KEY]
     : [];
+  const blockedPaths = Array.isArray(stored[STORAGE_BLOCKED_PATHS_KEY])
+    ? stored[STORAGE_BLOCKED_PATHS_KEY]
+    : [];
+  const timedAccessSites = Array.isArray(stored[STORAGE_TIMED_ACCESS_SITES_KEY])
+    ? stored[STORAGE_TIMED_ACCESS_SITES_KEY]
+    : [];
   const nextAvailableRuleId =
     Math.max(
       ...blockedSites.map((site) => site.id || 0),
       ...allowedPaths.map((path) => path.id || 0),
+      ...blockedPaths.map((path) => path.id || 0),
+      ...timedAccessSites.map((site) => site.id || 0),
       0
     ) + 1;
 
   return {
     blockedSites,
     allowedPaths,
+    blockedPaths,
+    timedAccessSites,
     nextRuleId: Number.isInteger(stored[STORAGE_NEXT_RULE_ID_KEY])
       ? Math.max(stored[STORAGE_NEXT_RULE_ID_KEY], nextAvailableRuleId)
       : nextAvailableRuleId
@@ -115,16 +168,18 @@ async function syncRules() {
   }
 }
 
-async function saveState(blockedSites, allowedPaths, nextRuleId) {
+async function saveState(state) {
   await chrome.storage.local.set({
-    [STORAGE_BLOCKED_SITES_KEY]: blockedSites,
-    [STORAGE_ALLOWED_PATHS_KEY]: allowedPaths,
-    [STORAGE_NEXT_RULE_ID_KEY]: nextRuleId
+    [STORAGE_BLOCKED_SITES_KEY]: state.blockedSites,
+    [STORAGE_ALLOWED_PATHS_KEY]: state.allowedPaths,
+    [STORAGE_BLOCKED_PATHS_KEY]: state.blockedPaths,
+    [STORAGE_TIMED_ACCESS_SITES_KEY]: state.timedAccessSites,
+    [STORAGE_NEXT_RULE_ID_KEY]: state.nextRuleId
   });
   await syncRules();
 }
 
-function renderList(list, items, emptyText, textKey, removeDataKey) {
+function renderList(list, items, emptyText, textKey, removeDataKey, metaText) {
   list.textContent = "";
 
   if (items.length === 0) {
@@ -140,38 +195,66 @@ function renderList(list, items, emptyText, textKey, removeDataKey) {
     .sort((first, second) => first[textKey].localeCompare(second[textKey]))
     .forEach((itemValue) => {
       const item = document.createElement("li");
+      const labelWrapper = document.createElement("span");
       const label = document.createElement("span");
       const removeButton = document.createElement("button");
 
       label.className = "domain";
       label.textContent = itemValue[textKey];
+      labelWrapper.append(label);
+
+      if (metaText) {
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = metaText(itemValue);
+        labelWrapper.append(meta);
+      }
+
       removeButton.type = "button";
       removeButton.textContent = "Remove";
       removeButton.dataset[removeDataKey] = itemValue[textKey];
 
-      item.append(label, removeButton);
+      item.append(labelWrapper, removeButton);
       list.append(item);
     });
 }
 
-function renderSites(blockedSites, allowedPaths) {
-  sitesList.textContent = "";
-  allowedPathsList.textContent = "";
-
-  renderList(sitesList, blockedSites, "No blocked sites yet.", "domain", "domain");
+function renderSites(state) {
+  renderList(
+    sitesList,
+    state.blockedSites,
+    "No blocked sites yet.",
+    "domain",
+    "domain"
+  );
   renderList(
     allowedPathsList,
-    allowedPaths,
+    state.allowedPaths,
     "No allowed paths yet.",
     "pattern",
-    "pattern"
+    "allowedPath"
+  );
+  renderList(
+    blockedPathsList,
+    state.blockedPaths,
+    "No blocked paths yet.",
+    "pattern",
+    "blockedPath"
+  );
+  renderList(
+    timedSitesList,
+    state.timedAccessSites,
+    "No timed access sites yet.",
+    "domain",
+    "timedDomain",
+    (site) => `${site.durationMinutes || DEFAULT_WORK_DURATION_MINUTES} min, ${site.workUrl || makeWorkUrl(site.domain)}`
   );
 }
 
 async function loadAndRender() {
   await syncRules();
-  const { blockedSites, allowedPaths } = await getStoredState();
-  renderSites(blockedSites, allowedPaths);
+  const state = await getStoredState();
+  renderSites(state);
 }
 
 siteForm.addEventListener("submit", async (event) => {
@@ -183,16 +266,25 @@ siteForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  const { blockedSites, allowedPaths, nextRuleId } = await getStoredState();
+  const state = await getStoredState();
 
-  if (blockedSites.some((site) => site.domain === domain)) {
+  if (state.blockedSites.some((site) => site.domain === domain)) {
     setStatus(`${domain} is already blocked.`);
     return;
   }
 
-  const updatedSites = blockedSites.concat({ id: nextRuleId, domain });
+  if (state.timedAccessSites.some((site) => site.domain === domain)) {
+    setStatus(`Remove ${domain} from timed access before blocking the whole site.`);
+    return;
+  }
+
+  const updatedState = {
+    ...state,
+    blockedSites: state.blockedSites.concat({ id: state.nextRuleId, domain }),
+    nextRuleId: state.nextRuleId + 1
+  };
   try {
-    await saveState(updatedSites, allowedPaths, nextRuleId + 1);
+    await saveState(updatedState);
   } catch (error) {
     console.error("Failed to add blocked site", error);
     setStatus(`Could not add ${domain}.`);
@@ -201,7 +293,7 @@ siteForm.addEventListener("submit", async (event) => {
 
   domainInput.value = "";
   setStatus(`${domain} added.`);
-  renderSites(updatedSites, allowedPaths);
+  renderSites(updatedState);
 });
 
 allowedPathForm.addEventListener("submit", async (event) => {
@@ -213,16 +305,20 @@ allowedPathForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  const { blockedSites, allowedPaths, nextRuleId } = await getStoredState();
+  const state = await getStoredState();
 
-  if (allowedPaths.some((path) => path.pattern === pattern)) {
+  if (state.allowedPaths.some((path) => path.pattern === pattern)) {
     setStatus(`${pattern} is already allowed.`);
     return;
   }
 
-  const updatedPaths = allowedPaths.concat({ id: nextRuleId, pattern });
+  const updatedState = {
+    ...state,
+    allowedPaths: state.allowedPaths.concat({ id: state.nextRuleId, pattern }),
+    nextRuleId: state.nextRuleId + 1
+  };
   try {
-    await saveState(blockedSites, updatedPaths, nextRuleId + 1);
+    await saveState(updatedState);
   } catch (error) {
     console.error("Failed to add allowed path", error);
     setStatus(`Could not allow ${pattern}.`);
@@ -231,7 +327,85 @@ allowedPathForm.addEventListener("submit", async (event) => {
 
   allowedPathInput.value = "";
   setStatus(`${pattern} allowed.`);
-  renderSites(blockedSites, updatedPaths);
+  renderSites(updatedState);
+});
+
+blockedPathForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const pattern = normalizeBlockedPath(blockedPathInput.value);
+  if (!pattern) {
+    setStatus("Enter a domain path, like youtube.com/shorts/*.");
+    return;
+  }
+
+  const state = await getStoredState();
+
+  if (state.blockedPaths.some((path) => path.pattern === pattern)) {
+    setStatus(`${pattern} is already blocked.`);
+    return;
+  }
+
+  const updatedState = {
+    ...state,
+    blockedPaths: state.blockedPaths.concat({ id: state.nextRuleId, pattern }),
+    nextRuleId: state.nextRuleId + 1
+  };
+  try {
+    await saveState(updatedState);
+  } catch (error) {
+    console.error("Failed to add blocked path", error);
+    setStatus(`Could not block ${pattern}.`);
+    return;
+  }
+
+  blockedPathInput.value = "";
+  setStatus(`${pattern} blocked.`);
+  renderSites(updatedState);
+});
+
+timedSiteForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const domain = normalizeTimedAccessDomain(timedSiteInput.value);
+  if (!domain) {
+    setStatus("Enter a domain or URL, like youtube.com.");
+    return;
+  }
+
+  const state = await getStoredState();
+
+  if (state.timedAccessSites.some((site) => site.domain === domain)) {
+    setStatus(`${domain} already uses timed access.`);
+    return;
+  }
+
+  if (state.blockedSites.some((site) => site.domain === domain)) {
+    setStatus(`Remove ${domain} from blocked sites before adding timed access.`);
+    return;
+  }
+
+  const updatedState = {
+    ...state,
+    timedAccessSites: state.timedAccessSites.concat({
+      id: state.nextRuleId,
+      domain,
+      durationMinutes: DEFAULT_WORK_DURATION_MINUTES,
+      workUrl: makeWorkUrl(domain)
+    }),
+    nextRuleId: state.nextRuleId + 1
+  };
+  try {
+    await saveState(updatedState);
+  } catch (error) {
+    console.error("Failed to add timed access site", error);
+    setStatus(`Could not add timed access for ${domain}.`);
+    return;
+  }
+
+  timedSiteInput.value = "";
+  setStatus(`${domain} timed access added.`);
+  renderSites(updatedState);
 });
 
 sitesList.addEventListener("click", async (event) => {
@@ -253,11 +427,14 @@ sitesList.addEventListener("click", async (event) => {
     return;
   }
 
-  const { blockedSites, allowedPaths, nextRuleId } = await getStoredState();
-  const updatedSites = blockedSites.filter((site) => site.domain !== domain);
+  const state = await getStoredState();
+  const updatedState = {
+    ...state,
+    blockedSites: state.blockedSites.filter((site) => site.domain !== domain)
+  };
 
   try {
-    await saveState(updatedSites, allowedPaths, nextRuleId);
+    await saveState(updatedState);
   } catch (error) {
     console.error("Failed to remove blocked site", error);
     setStatus(`Could not remove ${domain}.`);
@@ -265,21 +442,24 @@ sitesList.addEventListener("click", async (event) => {
   }
 
   setStatus(`${domain} removed.`);
-  renderSites(updatedSites, allowedPaths);
+  renderSites(updatedState);
 });
 
 allowedPathsList.addEventListener("click", async (event) => {
-  const removeButton = event.target.closest("button[data-pattern]");
+  const removeButton = event.target.closest("button[data-allowed-path]");
   if (!removeButton) {
     return;
   }
 
-  const pattern = removeButton.dataset.pattern;
-  const { blockedSites, allowedPaths, nextRuleId } = await getStoredState();
-  const updatedPaths = allowedPaths.filter((path) => path.pattern !== pattern);
+  const pattern = removeButton.dataset.allowedPath;
+  const state = await getStoredState();
+  const updatedState = {
+    ...state,
+    allowedPaths: state.allowedPaths.filter((path) => path.pattern !== pattern)
+  };
 
   try {
-    await saveState(blockedSites, updatedPaths, nextRuleId);
+    await saveState(updatedState);
   } catch (error) {
     console.error("Failed to remove allowed path", error);
     setStatus(`Could not remove ${pattern}.`);
@@ -287,7 +467,57 @@ allowedPathsList.addEventListener("click", async (event) => {
   }
 
   setStatus(`${pattern} removed.`);
-  renderSites(blockedSites, updatedPaths);
+  renderSites(updatedState);
+});
+
+blockedPathsList.addEventListener("click", async (event) => {
+  const removeButton = event.target.closest("button[data-blocked-path]");
+  if (!removeButton) {
+    return;
+  }
+
+  const pattern = removeButton.dataset.blockedPath;
+  const state = await getStoredState();
+  const updatedState = {
+    ...state,
+    blockedPaths: state.blockedPaths.filter((path) => path.pattern !== pattern)
+  };
+
+  try {
+    await saveState(updatedState);
+  } catch (error) {
+    console.error("Failed to remove blocked path", error);
+    setStatus(`Could not remove ${pattern}.`);
+    return;
+  }
+
+  setStatus(`${pattern} removed.`);
+  renderSites(updatedState);
+});
+
+timedSitesList.addEventListener("click", async (event) => {
+  const removeButton = event.target.closest("button[data-timed-domain]");
+  if (!removeButton) {
+    return;
+  }
+
+  const domain = removeButton.dataset.timedDomain;
+  const state = await getStoredState();
+  const updatedState = {
+    ...state,
+    timedAccessSites: state.timedAccessSites.filter((site) => site.domain !== domain)
+  };
+
+  try {
+    await saveState(updatedState);
+  } catch (error) {
+    console.error("Failed to remove timed access site", error);
+    setStatus(`Could not remove timed access for ${domain}.`);
+    return;
+  }
+
+  setStatus(`${domain} timed access removed.`);
+  renderSites(updatedState);
 });
 
 loadAndRender().catch((error) => {

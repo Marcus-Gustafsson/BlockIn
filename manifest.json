@@ -4,6 +4,7 @@
   "version": "1.0",
   "description": "Plays a video when a certain web address is entered.",
   "permissions": [
+    "alarms",
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess",
     "storage"
@@ -14,6 +15,17 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_popup": "popup.html"
   }
