@@ -14,6 +14,22 @@ function storeSelectedVideoPath(selectedVideoPath) {
 }
 
 /**
+ * Show a visible fallback message on the redirected page.
+ * @param {string} message - The message to show.
+ * @returns {void}
+ */
+function showVideoMessage(message) {
+  const videoMessage = document.getElementById("videoMessage");
+
+  if (!videoMessage) {
+    return;
+  }
+
+  videoMessage.textContent = message;
+  videoMessage.classList.add("visible");
+}
+
+/**
  * Pick a random video and set it on the video player.
  * @returns {Promise<void>} Resolves after the video source is set.
  */
@@ -24,8 +40,14 @@ async function initializeVideoPlayer() {
 
   if (!videoPlayer) {
     console.error("Video player element not found.");
+    showVideoMessage("Video player could not be loaded.");
     return;
   }
+
+  videoPlayer.addEventListener("error", () => {
+    console.error("Selected video failed to load.");
+    showVideoMessage("Selected video could not be loaded. Check the videos folder and reload the extension.");
+  });
 
   try {
     // Get a random video from the videos folder.
@@ -33,6 +55,7 @@ async function initializeVideoPlayer() {
 
     if (!randomVideoPath) {
       console.error("No videos were found in the videos folder.");
+      showVideoMessage("No supported videos found. Add .mp4, .webm, .mov, or .m4v files to the videos folder and reload the extension.");
       return;
     }
 
@@ -45,15 +68,10 @@ async function initializeVideoPlayer() {
     await storeSelectedVideoPath(randomVideoPath);
   } catch (error) {
     console.error("Failed to select a random video:", error);
+    showVideoMessage("Could not read the videos folder. Reload the extension and check the page console for details.");
   }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   initializeVideoPlayer();
 });
-  
-  
-  
-  
-  
-  

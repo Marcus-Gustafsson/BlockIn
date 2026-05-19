@@ -9,14 +9,14 @@ Status markers: `Planned`, `In Progress`, `Done`, `Blocked`.
 - `Done` - Added LF line-ending policy and normalized tracked text files to LF.
 - `Done` - Documented supported video formats and confirmed new videos can be added by dropping supported files into `videos/`.
 - `Done` - Replaced duplicated static and dynamic blocked-site rules with `blocked-sites.js` as one source of truth.
+- `Done` - Cleaned up unused generated files and tightened reliability around dynamic rule sync and video fallback errors.
+- `Done` - Added a manual test checklist for extension reload, redirects, video playback, fallback UI, and console checks.
+- `Done` - Added popup controls to add and remove blocked sites from local storage with a two-step removal guard.
 
 ## Next
 
-- `Planned` - Add popup controls to add and remove blocked sites without editing source code.
 - `Planned` - Support path-specific blocking so a sub-path such as `youtube.com/shorts` or `youtube.com/reels` can be blocked without blocking all of YouTube.
 - `Planned` - Add timed access flow for mixed-use sites: show Work/Procrastination choice, allow temporary access after Work, then ask again after the timer expires.
-- `Planned` - Add fallback/error UI when no supported videos are found or video loading fails.
-- `Planned` - Add a manual test checklist for reload, redirect, random video selection, and popup behavior.
 
 ## Later
 

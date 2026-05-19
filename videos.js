@@ -89,7 +89,3 @@ async function getRandomVideoPath() {
   );
   return availableVideoPaths[randomIndex];
 }
-  
-  
-  
-  

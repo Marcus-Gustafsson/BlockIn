@@ -1,20 +1,14 @@
-var BLOCKED_SITES = [
+self.BLOCKED_SITE_SEEDS = [
   {
     id: 2,
-    name: "Facebook",
-    urlFilter: "*://*.facebook.com/*",
-    resourceTypes: ["main_frame"]
+    domain: "facebook.com"
   },
   {
     id: 3,
-    name: "Instagram",
-    urlFilter: "*://*.instagram.com/*",
-    resourceTypes: ["main_frame"]
+    domain: "instagram.com"
   },
   {
     id: 4,
-    name: "Twitch",
-    urlFilter: "*://*.twitch.tv/*",
-    resourceTypes: ["main_frame"]
+    domain: "twitch.tv"
   }
 ];
