@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Work Check-In Video</title>
+  <style>
+    body {
+      align-items: center;
+      background: #05070a;
+      box-sizing: border-box;
+      color: #f6f7fb;
+      display: flex;
+      font-family: Arial, sans-serif;
+      height: 100vh;
+      justify-content: center;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    video {
+      display: none;
+      height: 100%;
+      object-fit: contain;
+      width: 100%;
+    }
+
+    video.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <video controls autoplay id="checkInVideoPlayer">
+    Your browser does not support the video tag.
+  </video>
+
+  <script src="check-in-video.js"></script>
+</body>
+</html>

@@ -9,8 +9,7 @@ const STORAGE_BLOCKED_PATHS_KEY = "blockedPaths";
 const STORAGE_TIMED_ACCESS_SITES_KEY = "timedAccessSites";
 const STORAGE_TIMED_ACCESS_SESSIONS_KEY = "timedAccessSessions";
 const STORAGE_NEXT_RULE_ID_KEY = "nextBlockedSiteRuleId";
-const ACCESS_EXPIRED_ALARM_NAME = "timedAccessExpired";
-const DEFAULT_WORK_DURATION_MINUTES = 15;
+const DEFAULT_WORK_DURATION_MINUTES = 1;
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -26,10 +25,6 @@ function splitPattern(pattern) {
     domain: pattern.slice(0, slashIndex),
     path: pattern.slice(slashIndex)
   };
-}
-
-function buildRootAndWwwDomainRegex(domain) {
-  return `^https?://(www\\.)?${escapeRegex(domain)}(?:/.*)?$`;
 }
 
 function buildRootAndWwwPathRegex(pattern) {
@@ -76,23 +71,6 @@ function buildBlockedPathRule(path) {
   };
 }
 
-function buildTimedAccessRule(site) {
-  return {
-    id: site.id,
-    priority: 1,
-    action: {
-      type: "redirect",
-      redirect: {
-        regexSubstitution: `${chrome.runtime.getURL("access.html")}#\\0`
-      }
-    },
-    condition: {
-      regexFilter: buildRootAndWwwDomainRegex(site.domain),
-      resourceTypes: DEFAULT_RESOURCE_TYPES
-    }
-  };
-}
-
 function buildAllowRule(path) {
   return {
     id: path.id,
@@ -130,6 +108,10 @@ function cleanSessionList(items) {
       item.domain &&
       Number.isInteger(item.expiresAt)
   );
+}
+
+function getTimedAccessKey(site) {
+  return site.pattern || site.domain;
 }
 
 function ensureUniqueRuleIds(
@@ -254,10 +236,10 @@ async function seedStoredRulesIfMissing() {
   blockedPaths = sanitized.blockedPaths;
   timedAccessSites = sanitized.timedAccessSites;
 
-  const timedDomains = new Set(timedAccessSites.map((site) => site.domain));
+  const timedKeys = new Set(timedAccessSites.map(getTimedAccessKey));
   const sessionCountBeforeDomainFilter = timedAccessSessions.length;
   const configuredSessions = timedAccessSessions.filter((session) =>
-    timedDomains.has(session.domain)
+    timedKeys.has(session.domain)
   );
   const sessionSplit = splitActiveSessions(configuredSessions);
   timedAccessSessions = sessionSplit.activeSessions;
@@ -299,32 +281,22 @@ async function seedStoredRulesIfMissing() {
   };
 }
 
-async function scheduleNextSessionExpiry(sessions) {
-  await chrome.alarms.clear(ACCESS_EXPIRED_ALARM_NAME);
-
-  if (sessions.length === 0) {
-    return;
-  }
-
-  const nextExpiry = Math.min(...sessions.map((session) => session.expiresAt));
-  chrome.alarms.create(ACCESS_EXPIRED_ALARM_NAME, { when: nextExpiry });
-}
-
 async function syncDynamicRules(reason) {
   try {
     const {
       blockedSites,
       allowedPaths,
       blockedPaths,
-      timedAccessSites,
-      timedAccessSessions
+      timedAccessSites
     } = await seedStoredRulesIfMissing();
     const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
-    const activeTimedDomains = new Set(
-      timedAccessSessions.map((session) => session.domain)
+    const timedAccessPatterns = new Set(
+      timedAccessSites
+        .map((site) => site.pattern)
+        .filter(Boolean)
     );
-    const gatedTimedAccessSites = timedAccessSites.filter(
-      (site) => !activeTimedDomains.has(site.domain)
+    const gatedBlockedPaths = blockedPaths.filter(
+      (path) => !timedAccessPatterns.has(path.pattern)
     );
 
     await chrome.declarativeNetRequest.updateDynamicRules({
@@ -332,12 +304,10 @@ async function syncDynamicRules(reason) {
       addRules: allowedPaths
         .map(buildAllowRule)
         .concat(
-          blockedPaths.map(buildBlockedPathRule),
-          blockedSites.map(buildRedirectRule),
-          gatedTimedAccessSites.map(buildTimedAccessRule)
+          gatedBlockedPaths.map(buildBlockedPathRule),
+          blockedSites.map(buildRedirectRule)
         )
     });
-    await scheduleNextSessionExpiry(timedAccessSessions);
     console.log(`Dynamic rules synced: ${reason}`);
     return true;
   } catch (error) {
@@ -348,7 +318,9 @@ async function syncDynamicRules(reason) {
 
 async function activateTimedAccess(domain) {
   const state = await seedStoredRulesIfMissing();
-  const site = state.timedAccessSites.find((item) => item.domain === domain);
+  const site = state.timedAccessSites.find(
+    (item) => getTimedAccessKey(item) === domain
+  );
 
   if (!site) {
     throw new Error(`${domain} is not a timed access site.`);
@@ -363,7 +335,6 @@ async function activateTimedAccess(domain) {
     [STORAGE_TIMED_ACCESS_SESSIONS_KEY]: sessions
   });
   await syncDynamicRules("timed access started");
-  await scheduleNextSessionExpiry(sessions);
 
   return {
     ok: true,
@@ -373,24 +344,12 @@ async function activateTimedAccess(domain) {
   };
 }
 
-async function expireTimedAccess() {
-  await syncDynamicRules("timed access expired");
-}
-
 chrome.runtime.onInstalled.addListener(() => {
   syncDynamicRules("installed or updated");
 });
 
 chrome.runtime.onStartup.addListener(() => {
   syncDynamicRules("browser startup");
-});
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === ACCESS_EXPIRED_ALARM_NAME) {
-    expireTimedAccess().catch((error) => {
-      console.error("Timed access expiration failed", error);
-    });
-  }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

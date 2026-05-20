@@ -2,8 +2,9 @@ const STORAGE_BLOCKED_SITES_KEY = "blockedSites";
 const STORAGE_ALLOWED_PATHS_KEY = "allowedPaths";
 const STORAGE_BLOCKED_PATHS_KEY = "blockedPaths";
 const STORAGE_TIMED_ACCESS_SITES_KEY = "timedAccessSites";
+const STORAGE_TIMED_ACCESS_SESSIONS_KEY = "timedAccessSessions";
 const STORAGE_NEXT_RULE_ID_KEY = "nextBlockedSiteRuleId";
-const DEFAULT_WORK_DURATION_MINUTES = 15;
+const DEFAULT_WORK_DURATION_MINUTES = 1;
 
 const siteForm = document.getElementById("add-site-form");
 const allowedPathForm = document.getElementById("add-allowed-path-form");
@@ -18,6 +19,8 @@ const sitesList = document.getElementById("blocked-sites");
 const allowedPathsList = document.getElementById("allowed-paths");
 const blockedPathsList = document.getElementById("blocked-paths");
 const timedSitesList = document.getElementById("timed-sites");
+
+let currentState = null;
 
 function normalizeDomain(value) {
   const trimmed = value.trim().toLowerCase();
@@ -113,6 +116,20 @@ function normalizeTimedAccessDomain(value) {
   return normalizeDomain(trimmed);
 }
 
+function normalizeTimedAccessTarget(value) {
+  const pattern = normalizePathPattern(value);
+  if (pattern) {
+    const slashIndex = pattern.indexOf("/");
+    return {
+      domain: pattern.slice(0, slashIndex),
+      pattern
+    };
+  }
+
+  const domain = normalizeTimedAccessDomain(value);
+  return domain ? { domain } : null;
+}
+
 function makeWorkUrl(domain) {
   return `https://www.${domain}/`;
 }
@@ -123,6 +140,7 @@ async function getStoredState() {
     STORAGE_ALLOWED_PATHS_KEY,
     STORAGE_BLOCKED_PATHS_KEY,
     STORAGE_TIMED_ACCESS_SITES_KEY,
+    STORAGE_TIMED_ACCESS_SESSIONS_KEY,
     STORAGE_NEXT_RULE_ID_KEY
   ]);
   const blockedSites = Array.isArray(stored[STORAGE_BLOCKED_SITES_KEY])
@@ -136,6 +154,9 @@ async function getStoredState() {
     : [];
   const timedAccessSites = Array.isArray(stored[STORAGE_TIMED_ACCESS_SITES_KEY])
     ? stored[STORAGE_TIMED_ACCESS_SITES_KEY]
+    : [];
+  const timedAccessSessions = Array.isArray(stored[STORAGE_TIMED_ACCESS_SESSIONS_KEY])
+    ? stored[STORAGE_TIMED_ACCESS_SESSIONS_KEY]
     : [];
   const nextAvailableRuleId =
     Math.max(
@@ -151,6 +172,7 @@ async function getStoredState() {
     allowedPaths,
     blockedPaths,
     timedAccessSites,
+    timedAccessSessions,
     nextRuleId: Number.isInteger(stored[STORAGE_NEXT_RULE_ID_KEY])
       ? Math.max(stored[STORAGE_NEXT_RULE_ID_KEY], nextAvailableRuleId)
       : nextAvailableRuleId
@@ -179,7 +201,11 @@ async function saveState(state) {
   await syncRules();
 }
 
-function renderList(list, items, emptyText, textKey, removeDataKey, metaText) {
+function getTimedAccessKey(site) {
+  return site.pattern || site.domain;
+}
+
+function renderList(list, items, emptyText, textKey, removeDataKey, metaText, labelText) {
   list.textContent = "";
 
   if (items.length === 0) {
@@ -192,7 +218,7 @@ function renderList(list, items, emptyText, textKey, removeDataKey, metaText) {
 
   items
     .slice()
-    .sort((first, second) => first[textKey].localeCompare(second[textKey]))
+    .sort((first, second) => labelText(first).localeCompare(labelText(second)))
     .forEach((itemValue) => {
       const item = document.createElement("li");
       const labelWrapper = document.createElement("span");
@@ -200,7 +226,7 @@ function renderList(list, items, emptyText, textKey, removeDataKey, metaText) {
       const removeButton = document.createElement("button");
 
       label.className = "domain";
-      label.textContent = itemValue[textKey];
+      label.textContent = labelText(itemValue);
       labelWrapper.append(label);
 
       if (metaText) {
@@ -212,34 +238,74 @@ function renderList(list, items, emptyText, textKey, removeDataKey, metaText) {
 
       removeButton.type = "button";
       removeButton.textContent = "Remove";
-      removeButton.dataset[removeDataKey] = itemValue[textKey];
+      removeButton.dataset[removeDataKey] = labelText(itemValue);
 
       item.append(labelWrapper, removeButton);
       list.append(item);
     });
 }
 
+function formatRemainingTime(milliseconds) {
+  const totalSeconds = Math.max(Math.ceil(milliseconds / 1000), 0);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function getActiveTimedAccessSession(accessKey, sessions) {
+  const now = Date.now();
+  return (
+    sessions.find(
+      (session) =>
+        session &&
+        session.domain === accessKey &&
+        Number.isInteger(session.expiresAt) &&
+        session.expiresAt > now
+    ) || null
+  );
+}
+
+function getTimedAccessMeta(site, sessions) {
+  const duration = site.durationMinutes || DEFAULT_WORK_DURATION_MINUTES;
+  const workUrl = site.workUrl || makeWorkUrl(site.domain);
+  const activeSession = getActiveTimedAccessSession(getTimedAccessKey(site), sessions);
+
+  if (!activeSession) {
+    return `${duration} min, inactive, ${workUrl}`;
+  }
+
+  return `${duration} min, ${formatRemainingTime(activeSession.expiresAt - Date.now())} left, ${workUrl}`;
+}
+
 function renderSites(state) {
+  currentState = state;
   renderList(
     sitesList,
     state.blockedSites,
     "No blocked sites yet.",
     "domain",
-    "domain"
+    "domain",
+    null,
+    (site) => site.domain
   );
   renderList(
     allowedPathsList,
     state.allowedPaths,
     "No allowed paths yet.",
     "pattern",
-    "allowedPath"
+    "allowedPath",
+    null,
+    (path) => path.pattern
   );
   renderList(
     blockedPathsList,
     state.blockedPaths,
     "No blocked paths yet.",
     "pattern",
-    "blockedPath"
+    "blockedPath",
+    null,
+    (path) => path.pattern
   );
   renderList(
     timedSitesList,
@@ -247,7 +313,8 @@ function renderSites(state) {
     "No timed access sites yet.",
     "domain",
     "timedDomain",
-    (site) => `${site.durationMinutes || DEFAULT_WORK_DURATION_MINUTES} min, ${site.workUrl || makeWorkUrl(site.domain)}`
+    (site) => getTimedAccessMeta(site, state.timedAccessSessions),
+    getTimedAccessKey
   );
 }
 
@@ -367,21 +434,22 @@ blockedPathForm.addEventListener("submit", async (event) => {
 timedSiteForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  const domain = normalizeTimedAccessDomain(timedSiteInput.value);
-  if (!domain) {
-    setStatus("Enter a domain or URL, like youtube.com.");
+  const target = normalizeTimedAccessTarget(timedSiteInput.value);
+  if (!target) {
+    setStatus("Enter a domain or path, like youtube.com or youtube.com/shorts/*.");
     return;
   }
+  const accessKey = target.pattern || target.domain;
 
   const state = await getStoredState();
 
-  if (state.timedAccessSites.some((site) => site.domain === domain)) {
-    setStatus(`${domain} already uses timed access.`);
+  if (state.timedAccessSites.some((site) => getTimedAccessKey(site) === accessKey)) {
+    setStatus(`${accessKey} already uses timed access.`);
     return;
   }
 
-  if (state.blockedSites.some((site) => site.domain === domain)) {
-    setStatus(`Remove ${domain} from blocked sites before adding timed access.`);
+  if (state.blockedSites.some((site) => site.domain === target.domain)) {
+    setStatus(`Remove ${target.domain} from blocked sites before adding timed access.`);
     return;
   }
 
@@ -389,9 +457,10 @@ timedSiteForm.addEventListener("submit", async (event) => {
     ...state,
     timedAccessSites: state.timedAccessSites.concat({
       id: state.nextRuleId,
-      domain,
+      domain: target.domain,
+      ...(target.pattern ? { pattern: target.pattern } : {}),
       durationMinutes: DEFAULT_WORK_DURATION_MINUTES,
-      workUrl: makeWorkUrl(domain)
+      workUrl: makeWorkUrl(target.domain)
     }),
     nextRuleId: state.nextRuleId + 1
   };
@@ -399,12 +468,12 @@ timedSiteForm.addEventListener("submit", async (event) => {
     await saveState(updatedState);
   } catch (error) {
     console.error("Failed to add timed access site", error);
-    setStatus(`Could not add timed access for ${domain}.`);
+    setStatus(`Could not add timed access for ${accessKey}.`);
     return;
   }
 
   timedSiteInput.value = "";
-  setStatus(`${domain} timed access added.`);
+  setStatus(`${accessKey} timed access added.`);
   renderSites(updatedState);
 });
 
@@ -505,11 +574,19 @@ timedSitesList.addEventListener("click", async (event) => {
   const state = await getStoredState();
   const updatedState = {
     ...state,
-    timedAccessSites: state.timedAccessSites.filter((site) => site.domain !== domain)
+    timedAccessSites: state.timedAccessSites.filter(
+      (site) => getTimedAccessKey(site) !== domain
+    ),
+    timedAccessSessions: state.timedAccessSessions.filter(
+      (session) => session.domain !== domain
+    )
   };
 
   try {
     await saveState(updatedState);
+    await chrome.storage.local.set({
+      [STORAGE_TIMED_ACCESS_SESSIONS_KEY]: updatedState.timedAccessSessions
+    });
   } catch (error) {
     console.error("Failed to remove timed access site", error);
     setStatus(`Could not remove timed access for ${domain}.`);
@@ -523,4 +600,24 @@ timedSitesList.addEventListener("click", async (event) => {
 loadAndRender().catch((error) => {
   console.error("Failed to load popup state", error);
   setStatus("Could not load blocked sites.");
+});
+
+window.setInterval(() => {
+  if (currentState) {
+    renderSites(currentState);
+  }
+}, 1000);
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (
+    areaName === "local" &&
+    (changes[STORAGE_TIMED_ACCESS_SITES_KEY] ||
+      changes[STORAGE_TIMED_ACCESS_SESSIONS_KEY])
+  ) {
+    getStoredState()
+      .then(renderSites)
+      .catch((error) => {
+        console.error("Failed to refresh timed access countdown", error);
+      });
+  }
 });

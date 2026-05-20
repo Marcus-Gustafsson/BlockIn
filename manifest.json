@@ -4,7 +4,6 @@
   "version": "1.0",
   "description": "Plays a video when a certain web address is entered.",
   "permissions": [
-    "alarms",
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess",
     "storage"
@@ -24,6 +23,18 @@
         "content-script.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "check-in-video.html",
+        "check-in-video.js",
+        "check-in-videos/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "action": {

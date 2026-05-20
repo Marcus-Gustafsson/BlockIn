@@ -17,10 +17,11 @@
       font-family: Arial, sans-serif;
     }
     video {
-      width: 100%;
-      height: auto;
-      max-width: 1000px;
-      max-height: 1000px;
+      width: min(100%, 960px);
+      height: min(100%, 72vh);
+      max-width: 960px;
+      max-height: 720px;
+      object-fit: contain;
     }
     .message {
       display: none;

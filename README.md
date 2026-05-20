@@ -81,12 +81,12 @@ You can also paste a full URL. BlockIn stores path rules as `domain/path/*` and 
 
 ## Timed Access Sites
 
-Timed access sites show a Work/Procrastination choice before opening a mixed-use domain. Choosing Work gives 15 minutes on the main site and sends the tab to the original URL you were trying to open. If the original URL is a blocked path, BlockIn sends the tab to the domain root instead. Blocked paths on that domain still redirect to motivation videos during the Work timer, including single-page app navigation such as YouTube moving into Shorts without a full page reload.
+Timed access sites and paths load behind a dimmed Work/Procrastination modal. Choosing Work opens a second confirmation modal so you can catch yourself before bypassing the blocker. Confirming `Yes, work` gives the configured time on the current page and closes the modal. When the timer expires, BlockIn shows the modal again without redirecting or interrupting the page with a motivation video. The popup shows the remaining Work time while it is active. Path entries such as `youtube.com/shorts/*` get their own timer separate from `youtube.com`.
 
 To add a timed access site:
 
 1. Click the bLockIn extension icon.
-2. Enter a domain or URL, such as `youtube.com` or `https://www.reddit.com/`.
+2. Enter a domain, URL, or path, such as `youtube.com`, `https://www.reddit.com/`, or `youtube.com/shorts/*`.
 3. Click `Add` in the Timed Access Sites section.
 
 A domain cannot be both a fully blocked site and a timed access site. Remove it from one list before adding it to the other.
@@ -104,6 +104,17 @@ Supported formats:
 
 New supported videos do not need to be named in source code. Drop them into `videos/`, reload the extension, and the random video selector can discover them.
 
+## Check-In Videos
+
+Put optional Work confirmation videos in the `check-in-videos/` folder. This folder is also ignored by git. When the second Work confirmation modal opens, BlockIn picks one supported file from that folder at random and plays it in the modal. If the folder is missing or empty, the modal still works without a video.
+
+Use the same supported formats as the main `videos/` folder:
+
+- `.mp4`
+- `.webm`
+- `.mov`
+- `.m4v`
+
 ## Manual Test
 
 See `manual_test_checklist.md` for the fuller checklist.
@@ -114,10 +125,11 @@ See `manual_test_checklist.md` for the fuller checklist.
 4. Confirm the tab redirects to the extension `video.html` page.
 5. Add and remove a test domain from the popup, such as `youtube.com`.
 6. Add `youtube.com/shorts/*` as a blocked path and confirm Shorts redirects while `https://www.youtube.com/` does not redirect unless timed access is configured.
-7. Add `youtube.com` as a timed access site and confirm Work allows `https://www.youtube.com/` for 15 minutes while Shorts still redirects.
+7. Add `youtube.com` and `youtube.com/shorts/*` as timed access entries and confirm each shows its own Work modal, second confirmation modal, and countdown.
 8. Confirm `https://www.facebook.com/messages/` does not redirect.
 9. Confirm a random video loads and plays from `videos/`.
-10. Check the extension service worker console and redirected page console for errors.
+10. Add a supported video to `check-in-videos/`, reload the extension, and confirm it can appear in the second Work confirmation modal.
+11. Check the extension service worker console and redirected page console for errors.
 
 ## Development Notes
 

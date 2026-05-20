@@ -15,6 +15,9 @@ Status markers: `Planned`, `In Progress`, `Done`, `Blocked`.
 - `Done` - Added allowed-path exceptions for blocked domains, including Facebook Messenger.
 - `Done` - Added popup-managed blocked paths for sub-path blocking without blocking the full domain.
 - `Done` - Added timed access flow for mixed-use sites with Work/Procrastination choice and expiring Work sessions.
+- `Done` - Replaced timed access redirect pages with in-page Work check-in modals and popup countdowns.
+- `Done` - Added path-specific timed access entries with separate timers and a darker check-in modal.
+- `Done` - Added a second Work confirmation modal with optional random check-in videos.
 
 ## Next
 
