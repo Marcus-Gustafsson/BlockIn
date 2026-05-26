@@ -1,6 +1,7 @@
 const STORAGE_BLOCKED_PATHS_KEY = "blockedPaths";
 const STORAGE_TIMED_ACCESS_SITES_KEY = "timedAccessSites";
 const STORAGE_TIMED_ACCESS_SESSIONS_KEY = "timedAccessSessions";
+const STORAGE_TIMED_ACCESS_MOOD_LOG_KEY = "timedAccessMoodLog";
 
 let lastCheckedUrl = "";
 let redirecting = false;
@@ -185,18 +186,49 @@ function redirectToMotivationVideo() {
   });
 }
 
+async function recordTimedAccessMood(site, mood) {
+  const accessKey = getTimedAccessKey(site);
+  const entry = {
+    mood: mood.value,
+    label: mood.label,
+    accessKey,
+    url: window.location.href,
+    hostname: window.location.hostname,
+    createdAt: Date.now()
+  };
+
+  try {
+    const stored = await chrome.storage.local.get([
+      STORAGE_TIMED_ACCESS_MOOD_LOG_KEY
+    ]);
+    const moodLog = Array.isArray(stored[STORAGE_TIMED_ACCESS_MOOD_LOG_KEY])
+      ? stored[STORAGE_TIMED_ACCESS_MOOD_LOG_KEY]
+      : [];
+
+    await chrome.storage.local.set({
+      [STORAGE_TIMED_ACCESS_MOOD_LOG_KEY]: moodLog.concat(entry)
+    });
+  } catch (error) {
+    console.error("Failed to record timed access mood", error);
+  } finally {
+    redirectToMotivationVideo();
+  }
+}
+
 function styleActionButton(button, options = {}) {
   button.style.alignItems = "center";
   button.style.appearance = "none";
-  button.style.background = options.primary
-    ? "#f6f7fb"
-    : "rgba(255, 255, 255, 0.08)";
+  button.style.background = options.background || (
+    options.primary
+      ? "#f6f7fb"
+      : "rgba(255, 255, 255, 0.08)"
+  );
   button.style.border = options.primary
     ? "0"
     : "1px solid rgba(255, 255, 255, 0.14)";
   button.style.borderRadius = "999px";
   button.style.boxSizing = "border-box";
-  button.style.color = options.primary ? "#0f1218" : "#eef1f6";
+  button.style.color = options.color || (options.primary ? "#0f1218" : "#eef1f6");
   button.style.cursor = "pointer";
   button.style.display = "inline-flex";
   button.style.fontSize = "16px";
@@ -218,6 +250,26 @@ function styleActionButton(button, options = {}) {
   button.addEventListener("mouseleave", () => {
     button.style.transform = "translateY(0)";
   });
+}
+
+function createMoodButton(mood, site, buttons) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = mood.label;
+  styleActionButton(button, {
+    background: mood.background,
+    color: mood.color,
+    minWidth: mood.minWidth
+  });
+
+  button.addEventListener("click", () => {
+    buttons.forEach((item) => {
+      item.disabled = true;
+    });
+    recordTimedAccessMood(site, mood);
+  });
+
+  return button;
 }
 
 function installCheckInVideoMessageListener() {
@@ -440,21 +492,52 @@ function createTimedAccessModal(site) {
   target.style.overflowWrap = "anywhere";
   target.style.padding = "7px 11px";
 
-  const actions = document.createElement("div");
-  actions.style.display = "flex";
-  actions.style.flexWrap = "wrap";
-  actions.style.gap = "12px";
-  actions.style.justifyContent = "center";
+  const workActions = document.createElement("div");
+  workActions.style.display = "flex";
+  workActions.style.justifyContent = "center";
+  workActions.style.margin = "0 0 22px";
 
   const workButton = document.createElement("button");
   workButton.type = "button";
   workButton.textContent = "Work";
   styleActionButton(workButton, { primary: true });
 
-  const procrastinationButton = document.createElement("button");
-  procrastinationButton.type = "button";
-  procrastinationButton.textContent = "Procrastination";
-  styleActionButton(procrastinationButton, { minWidth: "172px" });
+  const divider = document.createElement("div");
+  divider.setAttribute("aria-hidden", "true");
+  divider.style.borderTop = "1px solid rgba(255, 255, 255, 0.16)";
+  divider.style.margin = "0 auto 22px";
+  divider.style.width = "80%";
+
+  const modalButtons = [workButton];
+  const moods = [
+    {
+      value: "tired",
+      label: "Tired?",
+      background: "#2563eb",
+      color: "#f8fbff",
+      minWidth: "118px"
+    },
+    {
+      value: "unmotivated",
+      label: "Unmotivated?",
+      background: "#d97706",
+      color: "#fff8ed",
+      minWidth: "158px"
+    },
+    {
+      value: "scared_of_failure",
+      label: "Scared of failure?",
+      background: "#be123c",
+      color: "#fff5f7",
+      minWidth: "190px"
+    }
+  ];
+
+  const moodActions = document.createElement("div");
+  moodActions.style.display = "flex";
+  moodActions.style.flexWrap = "wrap";
+  moodActions.style.gap = "10px";
+  moodActions.style.justifyContent = "center";
 
   const message = document.createElement("p");
   message.dataset.blockinMessage = "true";
@@ -468,10 +551,14 @@ function createTimedAccessModal(site) {
     renderWorkConfirmModal(overlay, panel, site);
   });
 
-  procrastinationButton.addEventListener("click", redirectToMotivationVideo);
+  moods.forEach((mood) => {
+    const button = createMoodButton(mood, site, modalButtons);
+    modalButtons.push(button);
+    moodActions.append(button);
+  });
 
-  actions.append(workButton, procrastinationButton);
-  panel.append(title, body, target, actions, message);
+  workActions.append(workButton);
+  panel.append(title, body, target, workActions, divider, moodActions, message);
   overlay.append(panel);
   timedAccessModal = overlay;
   window.requestAnimationFrame(() => {

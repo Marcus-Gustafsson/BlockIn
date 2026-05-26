@@ -18,6 +18,7 @@ Status markers: `Planned`, `In Progress`, `Done`, `Blocked`.
 - `Done` - Replaced timed access redirect pages with in-page Work check-in modals and popup countdowns.
 - `Done` - Added path-specific timed access entries with separate timers and a darker check-in modal.
 - `Done` - Added a second Work confirmation modal with optional random check-in videos.
+- `Done` - Added mood-specific timed access exit buttons with local mood context logging.
 
 ## Next
 
