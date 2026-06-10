@@ -4,7 +4,7 @@ const STORAGE_BLOCKED_PATHS_KEY = "blockedPaths";
 const STORAGE_TIMED_ACCESS_SITES_KEY = "timedAccessSites";
 const STORAGE_TIMED_ACCESS_SESSIONS_KEY = "timedAccessSessions";
 const STORAGE_NEXT_RULE_ID_KEY = "nextBlockedSiteRuleId";
-const DEFAULT_WORK_DURATION_MINUTES = 1;
+const DEFAULT_WORK_DURATION_MINUTES = 10;
 
 const siteForm = document.getElementById("add-site-form");
 const allowedPathForm = document.getElementById("add-allowed-path-form");
