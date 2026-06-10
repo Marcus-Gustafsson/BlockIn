@@ -1,6 +1,6 @@
 # BlockIn Roadmap
 
-Status markers: `Planned`, `In Progress`, `Done`, `Blocked`.
+Status markers: `Planned` or `Done`
 
 ## Done
 
@@ -22,15 +22,4 @@ Status markers: `Planned`, `In Progress`, `Done`, `Blocked`.
 
 ## Next
 
-## Later
-
-- `Planned` - Add import/export or storage backup for user settings.
-- `Planned` - Add optional schedules or focus windows for when blocking should be active.
-- `Planned` - Add lightweight usage/debug status in the popup, such as last selected video and active rules.
-- `Planned` - Add Brave-specific manual test notes if Brave behavior differs from Chrome.
-
-## Parking Lot
-
-- `Planned` - Explore automated browser/extension testing if the project grows enough to justify tooling.
-- `Planned` - Consider richer motivation page design after core blocking and settings are reliable.
-- `Planned` - Revisit Chrome Web Store packaging only if personal-use scope changes.
+- add leisure sites for time capped leisure/brake activities, similar to timed accessed sites, but instead for leisure/relaxtion, with a e.g. maximum of 3 times maybe 15 minutes per day in total across all visited leisure sites, e.g. when eating or just need a brake to watch a episode or something. It should also be timed accessed as with the time accessed site, but when the timer runs out, it should block the sites and just start playing a motivational video instead if im currently viewing a leisure site when the timer runs out. We can have e.g. one block in the morning, one in the midday and one in the evening, each one limits the activity of leisure sites for a total of 15 min. We should also have a popup that confirms, similar to the timed access popup, but that just do we really want to leisure right now and use the time, it should also display the remaining time for the current block/period we are in.
