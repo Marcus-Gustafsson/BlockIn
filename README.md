@@ -91,6 +91,20 @@ To add a timed access site:
 
 A domain cannot be both a fully blocked site and a timed access site. Remove it from one list before adding it to the other.
 
+## Leisure Sites
+
+Leisure sites and paths share one 15 minute allowance in each local-time period: Morning (`06:00-12:00`), Midday (`12:00-18:00`), and Evening (`18:00-24:00`). Leisure access is unavailable from `00:00-06:00`, and unused time does not carry into another period.
+
+Opening a leisure target shows an in-page confirmation with the current period's remaining time. Confirming starts the shared countdown. Time is consumed only while that leisure tab is visible and focused. Leaving the site, switching tabs, minimizing the window, or hiding the page pauses the timer. Returning requires confirmation again. When the allowance reaches zero or the current period ends, the active leisure tab redirects to `video.html`.
+
+To add a leisure site:
+
+1. Click the bLockIn extension icon.
+2. Enter a domain, URL, or path, such as `netflix.com`, `https://www.youtube.com/watch/`, or `youtube.com/watch/*`.
+3. Click `Add` in the Leisure Sites section.
+
+The popup shows the current leisure period, shared remaining time, and whether the allowance is active, paused, exhausted, or unavailable. A leisure target cannot use the same domain as a fully blocked site or exactly match a timed access target.
+
 ## Local Videos
 
 Put personal video files in the `videos/` folder. The folder is ignored by git, so local videos stay out of commits.

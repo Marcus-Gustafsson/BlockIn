@@ -8,8 +8,19 @@ const STORAGE_ALLOWED_PATHS_KEY = "allowedPaths";
 const STORAGE_BLOCKED_PATHS_KEY = "blockedPaths";
 const STORAGE_TIMED_ACCESS_SITES_KEY = "timedAccessSites";
 const STORAGE_TIMED_ACCESS_SESSIONS_KEY = "timedAccessSessions";
+const STORAGE_LEISURE_SITES_KEY = "leisureSites";
+const STORAGE_LEISURE_PERIOD_STATE_KEY = "leisurePeriodState";
 const STORAGE_NEXT_RULE_ID_KEY = "nextBlockedSiteRuleId";
 const DEFAULT_WORK_DURATION_MINUTES = 10;
+const LEISURE_PERIOD_BUDGET_MS = 15 * 60 * 1000;
+const LEISURE_HEARTBEAT_STALE_MS = 3000;
+let leisureOperationQueue = Promise.resolve();
+
+function queueLeisureOperation(operation) {
+  const result = leisureOperationQueue.then(operation, operation);
+  leisureOperationQueue = result.catch(() => {});
+  return result;
+}
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -114,11 +125,110 @@ function getTimedAccessKey(site) {
   return site.pattern || site.domain;
 }
 
+function getAccessKey(site) {
+  return site.pattern || site.domain;
+}
+
+function getLeisurePeriod(now = new Date()) {
+  const hour = now.getHours();
+  if (hour < 6) {
+    return null;
+  }
+
+  const startHour = hour < 12 ? 6 : hour < 18 ? 12 : 18;
+  const endHour = startHour + 6;
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const periodEnd = new Date(now);
+  periodEnd.setHours(endHour, 0, 0, 0);
+
+  return {
+    id: `${year}-${month}-${day}:${startHour}`,
+    label: startHour === 6 ? "Morning" : startHour === 12 ? "Midday" : "Evening",
+    endsAt: periodEnd.getTime()
+  };
+}
+
+function makeFreshLeisureState(period) {
+  return {
+    periodId: period.id,
+    remainingMs: LEISURE_PERIOD_BUDGET_MS,
+    activeTabId: null,
+    activeSince: null,
+    lastHeartbeatAt: null
+  };
+}
+
+function normalizeLeisureState(value, nowMs = Date.now()) {
+  const period = getLeisurePeriod(new Date(nowMs));
+  if (!period) {
+    return { period: null, state: null };
+  }
+
+  if (!value || value.periodId !== period.id) {
+    return { period, state: makeFreshLeisureState(period) };
+  }
+
+  const state = {
+    periodId: period.id,
+    remainingMs: Math.max(
+      Math.min(Number(value.remainingMs) || 0, LEISURE_PERIOD_BUDGET_MS),
+      0
+    ),
+    activeTabId: Number.isInteger(value.activeTabId) ? value.activeTabId : null,
+    activeSince: Number.isFinite(value.activeSince) ? value.activeSince : null,
+    lastHeartbeatAt: Number.isFinite(value.lastHeartbeatAt)
+      ? value.lastHeartbeatAt
+      : null
+  };
+
+  if (state.activeTabId !== null && state.activeSince !== null) {
+    const chargeUntil = state.lastHeartbeatAt && nowMs - state.lastHeartbeatAt > LEISURE_HEARTBEAT_STALE_MS
+      ? Math.min(nowMs, state.lastHeartbeatAt + LEISURE_HEARTBEAT_STALE_MS)
+      : nowMs;
+    state.remainingMs = Math.max(state.remainingMs - Math.max(chargeUntil - state.activeSince, 0), 0);
+    state.activeSince = chargeUntil;
+
+    if (chargeUntil < nowMs || state.remainingMs === 0 || nowMs >= period.endsAt) {
+      state.activeTabId = null;
+      state.activeSince = null;
+      state.lastHeartbeatAt = null;
+    }
+  }
+
+  return { period, state };
+}
+
+function getLeisureStatusPayload(period, state, tabId = null) {
+  if (!period || !state) {
+    return { ok: true, available: false, status: "unavailable", remainingMs: 0 };
+  }
+
+  return {
+    ok: true,
+    available: state.remainingMs > 0,
+    status: state.remainingMs === 0
+      ? "exhausted"
+      : state.activeTabId === null
+        ? "paused"
+        : state.activeTabId === tabId
+          ? "active"
+          : "active-elsewhere",
+    periodId: period.id,
+    periodLabel: period.label,
+    periodEndsAt: period.endsAt,
+    remainingMs: state.remainingMs,
+    ownsLease: state.activeTabId === tabId
+  };
+}
+
 function ensureUniqueRuleIds(
   blockedSites,
   allowedPaths,
   blockedPaths,
   timedAccessSites,
+  leisureSites,
   nextRuleId
 ) {
   const usedIds = new Set();
@@ -158,6 +268,7 @@ function ensureUniqueRuleIds(
         workUrl: site.workUrl || makeWorkUrl(site.domain)
       })
     ),
+    leisureSites: leisureSites.map(reserveId),
     nextRuleId: nextAvailableId,
     changed
   };
@@ -178,6 +289,8 @@ async function seedStoredRulesIfMissing() {
     STORAGE_BLOCKED_PATHS_KEY,
     STORAGE_TIMED_ACCESS_SITES_KEY,
     STORAGE_TIMED_ACCESS_SESSIONS_KEY,
+    STORAGE_LEISURE_SITES_KEY,
+    STORAGE_LEISURE_PERIOD_STATE_KEY,
     STORAGE_NEXT_RULE_ID_KEY
   ]);
   const updates = {};
@@ -186,6 +299,7 @@ async function seedStoredRulesIfMissing() {
   let blockedPaths = stored[STORAGE_BLOCKED_PATHS_KEY];
   let timedAccessSites = stored[STORAGE_TIMED_ACCESS_SITES_KEY];
   let timedAccessSessions = stored[STORAGE_TIMED_ACCESS_SESSIONS_KEY];
+  let leisureSites = stored[STORAGE_LEISURE_SITES_KEY];
 
   if (!Array.isArray(blockedSites)) {
     blockedSites = self.BLOCKED_SITE_SEEDS.map((site) => ({
@@ -218,23 +332,31 @@ async function seedStoredRulesIfMissing() {
     updates[STORAGE_TIMED_ACCESS_SESSIONS_KEY] = timedAccessSessions;
   }
 
+  if (!Array.isArray(leisureSites)) {
+    leisureSites = [];
+    updates[STORAGE_LEISURE_SITES_KEY] = leisureSites;
+  }
+
   blockedSites = cleanSiteList(blockedSites);
   allowedPaths = cleanPathList(allowedPaths);
   blockedPaths = cleanPathList(blockedPaths);
   timedAccessSites = cleanSiteList(timedAccessSites);
   timedAccessSessions = cleanSessionList(timedAccessSessions);
+  leisureSites = cleanSiteList(leisureSites);
 
   const sanitized = ensureUniqueRuleIds(
     blockedSites,
     allowedPaths,
     blockedPaths,
     timedAccessSites,
+    leisureSites,
     stored[STORAGE_NEXT_RULE_ID_KEY]
   );
   blockedSites = sanitized.blockedSites;
   allowedPaths = sanitized.allowedPaths;
   blockedPaths = sanitized.blockedPaths;
   timedAccessSites = sanitized.timedAccessSites;
+  leisureSites = sanitized.leisureSites;
 
   const timedKeys = new Set(timedAccessSites.map(getTimedAccessKey));
   const sessionCountBeforeDomainFilter = timedAccessSessions.length;
@@ -250,6 +372,7 @@ async function seedStoredRulesIfMissing() {
     updates[STORAGE_BLOCKED_PATHS_KEY] = blockedPaths;
     updates[STORAGE_TIMED_ACCESS_SITES_KEY] = timedAccessSites;
     updates[STORAGE_TIMED_ACCESS_SESSIONS_KEY] = timedAccessSessions;
+    updates[STORAGE_LEISURE_SITES_KEY] = leisureSites;
   }
 
   if (sessionSplit.expiredSessions.length > 0) {
@@ -271,12 +394,21 @@ async function seedStoredRulesIfMissing() {
     await chrome.storage.local.set(updates);
   }
 
+  const leisure = normalizeLeisureState(stored[STORAGE_LEISURE_PERIOD_STATE_KEY]);
+  if (leisure.state && JSON.stringify(leisure.state) !== JSON.stringify(stored[STORAGE_LEISURE_PERIOD_STATE_KEY])) {
+    await chrome.storage.local.set({
+      [STORAGE_LEISURE_PERIOD_STATE_KEY]: leisure.state
+    });
+  }
+
   return {
     blockedSites,
     allowedPaths,
     blockedPaths,
     timedAccessSites,
     timedAccessSessions,
+    leisureSites,
+    leisurePeriodState: leisure.state,
     nextRuleId: sanitized.nextRuleId
   };
 }
@@ -287,11 +419,12 @@ async function syncDynamicRules(reason) {
       blockedSites,
       allowedPaths,
       blockedPaths,
-      timedAccessSites
+      timedAccessSites,
+      leisureSites
     } = await seedStoredRulesIfMissing();
     const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
     const timedAccessPatterns = new Set(
-      timedAccessSites
+      timedAccessSites.concat(leisureSites)
         .map((site) => site.pattern)
         .filter(Boolean)
     );
@@ -314,6 +447,69 @@ async function syncDynamicRules(reason) {
     console.error(`Failed to sync dynamic rules: ${reason}`, error);
     return false;
   }
+}
+
+async function getLeisureStatus(tabId = null) {
+  const stored = await getFromStorage([STORAGE_LEISURE_PERIOD_STATE_KEY]);
+  const storedState = stored[STORAGE_LEISURE_PERIOD_STATE_KEY];
+  const leisure = normalizeLeisureState(storedState);
+  if (leisure.state && JSON.stringify(leisure.state) !== JSON.stringify(storedState)) {
+    await chrome.storage.local.set({ [STORAGE_LEISURE_PERIOD_STATE_KEY]: leisure.state });
+  }
+  return getLeisureStatusPayload(leisure.period, leisure.state, tabId);
+}
+
+async function startLeisure(tabId, accessKey) {
+  const state = await seedStoredRulesIfMissing();
+  if (!state.leisureSites.some((site) => getAccessKey(site) === accessKey)) {
+    throw new Error(`${accessKey} is not a leisure site.`);
+  }
+
+  const stored = await getFromStorage([STORAGE_LEISURE_PERIOD_STATE_KEY]);
+  const leisure = normalizeLeisureState(stored[STORAGE_LEISURE_PERIOD_STATE_KEY]);
+  if (!leisure.period || !leisure.state || leisure.state.remainingMs <= 0) {
+    return getLeisureStatusPayload(leisure.period, leisure.state, tabId);
+  }
+
+  leisure.state.activeTabId = tabId;
+  leisure.state.activeSince = Date.now();
+  leisure.state.lastHeartbeatAt = leisure.state.activeSince;
+  await chrome.storage.local.set({ [STORAGE_LEISURE_PERIOD_STATE_KEY]: leisure.state });
+  return getLeisureStatusPayload(leisure.period, leisure.state, tabId);
+}
+
+async function heartbeatLeisure(tabId) {
+  const stored = await getFromStorage([STORAGE_LEISURE_PERIOD_STATE_KEY]);
+  const leisure = normalizeLeisureState(stored[STORAGE_LEISURE_PERIOD_STATE_KEY]);
+  if (!leisure.period || !leisure.state || leisure.state.activeTabId !== tabId) {
+    if (leisure.state) {
+      await chrome.storage.local.set({ [STORAGE_LEISURE_PERIOD_STATE_KEY]: leisure.state });
+    }
+    return getLeisureStatusPayload(leisure.period, leisure.state, tabId);
+  }
+
+  const now = Date.now();
+  leisure.state.lastHeartbeatAt = now;
+  leisure.state.activeSince = now;
+  if (leisure.state.remainingMs <= 0 || now >= leisure.period.endsAt) {
+    leisure.state.activeTabId = null;
+    leisure.state.activeSince = null;
+    leisure.state.lastHeartbeatAt = null;
+  }
+  await chrome.storage.local.set({ [STORAGE_LEISURE_PERIOD_STATE_KEY]: leisure.state });
+  return getLeisureStatusPayload(leisure.period, leisure.state, tabId);
+}
+
+async function pauseLeisure(tabId) {
+  const stored = await getFromStorage([STORAGE_LEISURE_PERIOD_STATE_KEY]);
+  const leisure = normalizeLeisureState(stored[STORAGE_LEISURE_PERIOD_STATE_KEY]);
+  if (leisure.state && leisure.state.activeTabId === tabId) {
+    leisure.state.activeTabId = null;
+    leisure.state.activeSince = null;
+    leisure.state.lastHeartbeatAt = null;
+    await chrome.storage.local.set({ [STORAGE_LEISURE_PERIOD_STATE_KEY]: leisure.state });
+  }
+  return getLeisureStatusPayload(leisure.period, leisure.state, tabId);
 }
 
 async function activateTimedAccess(domain) {
@@ -376,6 +572,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, error: error.message });
       });
 
+    return true;
+  }
+
+  if (["getLeisureStatus", "startLeisure", "heartbeatLeisure", "pauseLeisure"].includes(message.action)) {
+    if (!sender.tab || !Number.isInteger(sender.tab.id)) {
+      queueLeisureOperation(() => getLeisureStatus())
+        .then((response) => sendResponse(response))
+        .catch((error) => sendResponse({ ok: false, error: error.message }));
+      return true;
+    }
+
+    const action = queueLeisureOperation(() => (
+      message.action === "startLeisure"
+        ? startLeisure(sender.tab.id, message.accessKey)
+        : message.action === "heartbeatLeisure"
+          ? heartbeatLeisure(sender.tab.id)
+          : message.action === "pauseLeisure"
+            ? pauseLeisure(sender.tab.id)
+            : getLeisureStatus(sender.tab.id)
+    ));
+    action
+      .then((response) => sendResponse(response))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 

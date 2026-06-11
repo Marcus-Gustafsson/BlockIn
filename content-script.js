@@ -2,6 +2,7 @@ const STORAGE_BLOCKED_PATHS_KEY = "blockedPaths";
 const STORAGE_TIMED_ACCESS_SITES_KEY = "timedAccessSites";
 const STORAGE_TIMED_ACCESS_SESSIONS_KEY = "timedAccessSessions";
 const STORAGE_TIMED_ACCESS_MOOD_LOG_KEY = "timedAccessMoodLog";
+const STORAGE_LEISURE_SITES_KEY = "leisureSites";
 
 let lastCheckedUrl = "";
 let redirecting = false;
@@ -13,6 +14,11 @@ let mediaPauseTimerId = null;
 let savedDocumentOverflow = null;
 let savedBodyOverflow = null;
 let checkInVideoMessageListenerInstalled = false;
+let leisureModal = null;
+let leisureActive = false;
+let leisureHeartbeatId = null;
+let leisureExpiryTimerId = null;
+let lastLeisureUrl = "";
 
 function normalizeDomain(hostname) {
   return hostname.toLowerCase().startsWith("www.")
@@ -84,6 +90,10 @@ function findTimedAccessSite(url, sites) {
     sites.find((site) => site && !site.pattern && site.domain === domain) ||
     null
   );
+}
+
+function findAccessSite(url, sites) {
+  return findTimedAccessSite(url, sites);
 }
 
 function findActiveTimedAccessSession(accessKey, sessions) {
@@ -184,6 +194,252 @@ function redirectToMotivationVideo() {
       window.location.replace(chrome.runtime.getURL("video.html"));
     }
   });
+}
+
+function formatLeisureTime(milliseconds) {
+  const totalSeconds = Math.max(Math.ceil(milliseconds / 1000), 0);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function clearLeisureTimers() {
+  if (leisureHeartbeatId !== null) {
+    window.clearInterval(leisureHeartbeatId);
+    leisureHeartbeatId = null;
+  }
+  if (leisureExpiryTimerId !== null) {
+    window.clearTimeout(leisureExpiryTimerId);
+    leisureExpiryTimerId = null;
+  }
+}
+
+function removeLeisureModal() {
+  if (leisureModal) {
+    leisureModal.remove();
+    leisureModal = null;
+  }
+  stopMediaPauseGuard();
+  unlockPageScroll();
+}
+
+function pauseLeisure() {
+  const wasActive = leisureActive;
+  leisureActive = false;
+  clearLeisureTimers();
+  if (wasActive) {
+    chrome.runtime.sendMessage({ action: "pauseLeisure" }, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+}
+
+function scheduleLeisureExpiry(status) {
+  if (leisureExpiryTimerId !== null) {
+    window.clearTimeout(leisureExpiryTimerId);
+  }
+  const untilPeriodEnd = Number.isFinite(status.periodEndsAt)
+    ? status.periodEndsAt - Date.now()
+    : status.remainingMs;
+  leisureExpiryTimerId = window.setTimeout(
+    redirectToMotivationVideo,
+    Math.max(Math.min(status.remainingMs, untilPeriodEnd), 0) + 100
+  );
+}
+
+function handleLeisureHeartbeat() {
+  if (!leisureActive || document.hidden || !document.hasFocus()) {
+    return;
+  }
+
+  chrome.runtime.sendMessage({ action: "heartbeatLeisure" }, (status) => {
+    if (!leisureActive) {
+      return;
+    }
+    if (!status || !status.ok) {
+      return;
+    }
+    if (!status.available || status.status === "exhausted" || status.status === "unavailable") {
+      leisureActive = false;
+      clearLeisureTimers();
+      redirectToMotivationVideo();
+      return;
+    }
+    if (!status.ownsLease) {
+      leisureActive = false;
+      clearLeisureTimers();
+      enforceLeisureAccess();
+      return;
+    }
+    scheduleLeisureExpiry(status);
+  });
+}
+
+function startLeisureHeartbeat(status) {
+  leisureActive = true;
+  clearLeisureTimers();
+  scheduleLeisureExpiry(status);
+  leisureHeartbeatId = window.setInterval(handleLeisureHeartbeat, 1000);
+}
+
+function createLeisureModal(site, status) {
+  if (leisureModal) {
+    const remaining = leisureModal.querySelector("[data-blockin-leisure-remaining]");
+    if (remaining) {
+      remaining.textContent = `${formatLeisureTime(status.remainingMs)} remaining in ${status.periodLabel.toLowerCase()} period`;
+    }
+    return leisureModal;
+  }
+
+  const overlay = document.createElement("div");
+  overlay.id = "blockin-leisure-modal";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  Object.assign(overlay.style, {
+    alignItems: "center",
+    backdropFilter: "blur(14px) saturate(0.7)",
+    background: "rgba(5, 12, 18, 0.8)",
+    boxSizing: "border-box",
+    color: "#f6f7fb",
+    display: "flex",
+    fontFamily: "Arial, sans-serif",
+    inset: "0",
+    justifyContent: "center",
+    padding: "24px",
+    position: "fixed",
+    zIndex: "2147483647"
+  });
+
+  const panel = document.createElement("section");
+  Object.assign(panel.style, {
+    background: "linear-gradient(180deg, #17232a 0%, #0d151a 100%)",
+    border: "1px solid rgba(255, 255, 255, 0.16)",
+    borderRadius: "18px",
+    boxShadow: "0 28px 90px rgba(0, 0, 0, 0.58)",
+    boxSizing: "border-box",
+    maxWidth: "520px",
+    padding: "30px",
+    textAlign: "center",
+    width: "100%"
+  });
+
+  const title = document.createElement("h1");
+  title.textContent = "Use leisure time now?";
+  Object.assign(title.style, { color: "#fff", fontSize: "32px", margin: "0 0 12px" });
+
+  const body = document.createElement("p");
+  body.textContent = "This uses the shared leisure budget across all leisure sites. Time pauses when this tab is not visible and focused.";
+  Object.assign(body.style, { color: "#c9d5d9", fontSize: "16px", lineHeight: "1.45", margin: "0 0 18px" });
+
+  const target = document.createElement("p");
+  target.textContent = getTimedAccessKey(site);
+  Object.assign(target.style, { color: "#9fb0b7", fontSize: "13px", margin: "0 0 8px", overflowWrap: "anywhere" });
+
+  const remaining = document.createElement("p");
+  remaining.dataset.blockinLeisureRemaining = "true";
+  remaining.textContent = `${formatLeisureTime(status.remainingMs)} remaining in ${status.periodLabel.toLowerCase()} period`;
+  Object.assign(remaining.style, { color: "#8ee3bd", fontSize: "18px", fontWeight: "700", margin: "0 0 22px" });
+
+  const actions = document.createElement("div");
+  Object.assign(actions.style, { display: "flex", flexWrap: "wrap", gap: "12px", justifyContent: "center" });
+  const confirmButton = document.createElement("button");
+  confirmButton.type = "button";
+  confirmButton.textContent = "Yes, use leisure time";
+  styleActionButton(confirmButton, { primary: true, minWidth: "190px" });
+  const exitButton = document.createElement("button");
+  exitButton.type = "button";
+  exitButton.textContent = "No, motivate me";
+  styleActionButton(exitButton, { minWidth: "170px" });
+
+  const message = document.createElement("p");
+  message.setAttribute("role", "status");
+  Object.assign(message.style, { color: "#f6cf82", fontSize: "14px", margin: "14px 0 0", minHeight: "20px" });
+
+  confirmButton.addEventListener("click", () => {
+    confirmButton.disabled = true;
+    exitButton.disabled = true;
+    message.textContent = "Starting leisure timer...";
+    chrome.runtime.sendMessage({
+      action: "startLeisure",
+      accessKey: getTimedAccessKey(site)
+    }, (response) => {
+      if (!response || !response.ok) {
+        message.textContent = "Could not start leisure timer. Reload extension and try again.";
+        confirmButton.disabled = false;
+        exitButton.disabled = false;
+        return;
+      }
+      if (!response.available) {
+        redirectToMotivationVideo();
+        return;
+      }
+      removeLeisureModal();
+      startLeisureHeartbeat(response);
+      if (document.hidden || !document.hasFocus()) {
+        pauseLeisure();
+      }
+    });
+  });
+  exitButton.addEventListener("click", redirectToMotivationVideo);
+
+  actions.append(confirmButton, exitButton);
+  panel.append(title, body, target, remaining, actions, message);
+  overlay.append(panel);
+  leisureModal = overlay;
+  return overlay;
+}
+
+async function enforceLeisureAccess() {
+  if (redirecting) {
+    return;
+  }
+
+  try {
+    const stored = await chrome.storage.local.get([STORAGE_LEISURE_SITES_KEY]);
+    const sites = Array.isArray(stored[STORAGE_LEISURE_SITES_KEY])
+      ? stored[STORAGE_LEISURE_SITES_KEY]
+      : [];
+    const site = findAccessSite(window.location, sites);
+    const urlChanged = window.location.href !== lastLeisureUrl;
+    lastLeisureUrl = window.location.href;
+
+    if (!site) {
+      pauseLeisure();
+      removeLeisureModal();
+      return;
+    }
+
+    removeTimedAccessModal();
+    if (document.hidden || !document.hasFocus()) {
+      pauseLeisure();
+      removeLeisureModal();
+      return;
+    }
+
+    if (leisureActive && !urlChanged) {
+      return;
+    }
+
+    const status = await chrome.runtime.sendMessage({ action: "getLeisureStatus" });
+    if (!status || !status.ok) {
+      return;
+    }
+    if (!status.available) {
+      redirectToMotivationVideo();
+      return;
+    }
+    if (leisureActive && status.ownsLease) {
+      scheduleLeisureExpiry(status);
+      return;
+    }
+
+    pauseLeisure();
+    lockPageScroll();
+    startMediaPauseGuard();
+    document.documentElement.append(createLeisureModal(site, status));
+  } catch (error) {
+    console.error("Failed to enforce leisure access", error);
+  }
 }
 
 async function recordTimedAccessMood(site, mood) {
@@ -579,7 +835,8 @@ async function enforceTimedAccess() {
   try {
     const stored = await chrome.storage.local.get([
       STORAGE_TIMED_ACCESS_SITES_KEY,
-      STORAGE_TIMED_ACCESS_SESSIONS_KEY
+      STORAGE_TIMED_ACCESS_SESSIONS_KEY,
+      STORAGE_LEISURE_SITES_KEY
     ]);
     const sites = Array.isArray(stored[STORAGE_TIMED_ACCESS_SITES_KEY])
       ? stored[STORAGE_TIMED_ACCESS_SITES_KEY]
@@ -587,6 +844,14 @@ async function enforceTimedAccess() {
     const sessions = Array.isArray(stored[STORAGE_TIMED_ACCESS_SESSIONS_KEY])
       ? stored[STORAGE_TIMED_ACCESS_SESSIONS_KEY]
       : [];
+    const leisureSites = Array.isArray(stored[STORAGE_LEISURE_SITES_KEY])
+      ? stored[STORAGE_LEISURE_SITES_KEY]
+      : [];
+    if (findAccessSite(window.location, leisureSites)) {
+      clearTimedAccessTimer();
+      removeTimedAccessModal();
+      return;
+    }
     const site = findTimedAccessSite(window.location, sites);
     const accessKey = site ? getTimedAccessKey(site) : "";
     const previousAccessKey = lastTimedAccessKey;
@@ -629,7 +894,8 @@ async function enforceBlockedPath() {
   try {
     const stored = await chrome.storage.local.get([
       STORAGE_BLOCKED_PATHS_KEY,
-      STORAGE_TIMED_ACCESS_SITES_KEY
+      STORAGE_TIMED_ACCESS_SITES_KEY,
+      STORAGE_LEISURE_SITES_KEY
     ]);
     const blockedPaths = Array.isArray(stored[STORAGE_BLOCKED_PATHS_KEY])
       ? stored[STORAGE_BLOCKED_PATHS_KEY]
@@ -637,8 +903,14 @@ async function enforceBlockedPath() {
     const timedAccessSites = Array.isArray(stored[STORAGE_TIMED_ACCESS_SITES_KEY])
       ? stored[STORAGE_TIMED_ACCESS_SITES_KEY]
       : [];
+    const leisureSites = Array.isArray(stored[STORAGE_LEISURE_SITES_KEY])
+      ? stored[STORAGE_LEISURE_SITES_KEY]
+      : [];
 
-    if (timedAccessSites.some((site) => matchesTimedAccessPattern(window.location, site))) {
+    if (
+      timedAccessSites.some((site) => matchesTimedAccessPattern(window.location, site)) ||
+      leisureSites.some((site) => matchesTimedAccessPattern(window.location, site))
+    ) {
       return;
     }
 
@@ -663,12 +935,17 @@ function scheduleTimedAccessCheck() {
   window.setTimeout(enforceTimedAccess, 0);
 }
 
+function scheduleLeisureCheck() {
+  window.setTimeout(enforceLeisureAccess, 0);
+}
+
 function checkUrlForTimedAccessChange() {
   if (redirecting || window.location.href === lastTimedAccessUrl) {
     return;
   }
 
   scheduleTimedAccessCheck();
+  scheduleLeisureCheck();
 }
 
 const originalPushState = history.pushState;
@@ -678,6 +955,7 @@ history.pushState = function pushState(...args) {
   const result = originalPushState.apply(this, args);
   scheduleBlockedPathCheck();
   scheduleTimedAccessCheck();
+  scheduleLeisureCheck();
   return result;
 };
 
@@ -685,6 +963,7 @@ history.replaceState = function replaceState(...args) {
   const result = originalReplaceState.apply(this, args);
   scheduleBlockedPathCheck();
   scheduleTimedAccessCheck();
+  scheduleLeisureCheck();
   return result;
 };
 
@@ -694,21 +973,40 @@ window.addEventListener("pageshow", scheduleBlockedPathCheck);
 window.addEventListener("popstate", scheduleTimedAccessCheck);
 window.addEventListener("hashchange", scheduleTimedAccessCheck);
 window.addEventListener("pageshow", scheduleTimedAccessCheck);
+window.addEventListener("popstate", scheduleLeisureCheck);
+window.addEventListener("hashchange", scheduleLeisureCheck);
+window.addEventListener("pageshow", scheduleLeisureCheck);
+window.addEventListener("focus", scheduleLeisureCheck);
+window.addEventListener("blur", () => {
+  pauseLeisure();
+  removeLeisureModal();
+});
+window.addEventListener("beforeunload", pauseLeisure);
 document.addEventListener("play", () => {
-  if (timedAccessModal) {
+  if (timedAccessModal || leisureModal) {
     pausePageMedia();
   }
 }, true);
 document.addEventListener("visibilitychange", () => {
   scheduleBlockedPathCheck();
   scheduleTimedAccessCheck();
+  if (document.hidden) {
+    pauseLeisure();
+    removeLeisureModal();
+  } else {
+    scheduleLeisureCheck();
+  }
 });
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") {
     return;
   }
 
-  if (changes[STORAGE_BLOCKED_PATHS_KEY] || changes[STORAGE_TIMED_ACCESS_SITES_KEY]) {
+  if (
+    changes[STORAGE_BLOCKED_PATHS_KEY] ||
+    changes[STORAGE_TIMED_ACCESS_SITES_KEY] ||
+    changes[STORAGE_LEISURE_SITES_KEY]
+  ) {
     lastCheckedUrl = "";
     scheduleBlockedPathCheck();
   }
@@ -716,9 +1014,19 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes[STORAGE_TIMED_ACCESS_SITES_KEY] || changes[STORAGE_TIMED_ACCESS_SESSIONS_KEY]) {
     scheduleTimedAccessCheck();
   }
+
+  if (changes[STORAGE_LEISURE_SITES_KEY]) {
+    scheduleLeisureCheck();
+  }
 });
 
 scheduleBlockedPathCheck();
 scheduleTimedAccessCheck();
+scheduleLeisureCheck();
 window.setInterval(enforceBlockedPath, 1000);
 window.setInterval(checkUrlForTimedAccessChange, 500);
+window.setInterval(() => {
+  if (!redirecting && window.location.href !== lastLeisureUrl) {
+    scheduleLeisureCheck();
+  }
+}, 500);

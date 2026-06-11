@@ -59,6 +59,26 @@ Use this after changes that affect blocking, videos, popup behavior, or permissi
 - Click `Work` after expiry and confirm the popup countdown resets near 15:00.
 - Remove `youtube.com` from timed access and confirm the root domain no longer shows the Work/Procrastination modal.
 
+## Leisure Access
+
+- Add `netflix.com` and `youtube.com/watch/*` as leisure targets and confirm both appear in the popup.
+- Confirm popup shows Morning, Midday, or Evening with a shared countdown near 15:00, or unavailable between 00:00 and 06:00.
+- Confirm adding a leisure target whose domain is fully blocked is rejected.
+- Confirm adding a leisure target identical to a timed access target is rejected in either direction.
+- Open a leisure target and confirm a blocking modal asks `Use leisure time now?` and shows current remaining time.
+- Choose `No, motivate me` and confirm the tab redirects to `video.html`.
+- Confirm leisure access, keep tab visible and focused, and verify popup shared countdown decreases.
+- Switch to another tab or minimize Brave and confirm countdown pauses.
+- Return to leisure tab and confirm modal appears again before countdown resumes.
+- Move between URLs inside same leisure path using SPA navigation and confirm active access continues without another prompt.
+- Navigate away from leisure, return, and confirm another prompt appears.
+- Start leisure on one target, then confirm another leisure target and verify both use same remaining budget.
+- Confirming a second focused leisure tab transfers active countdown; first tab stops consuming time and prompts again when focused.
+- Exhaust allowance and confirm active leisure tab immediately redirects to `video.html` and later leisure visits redirect without confirmation.
+- Cross a period boundary while active and confirm immediate redirect plus fresh 15:00 allowance in next period.
+- Reload extension or restart Brave and confirm remaining current-period allowance persists without continuing to drain while inactive.
+- Remove leisure targets and confirm they stop showing leisure prompts.
+
 ## Videos
 
 - Confirm a random local video loads from `videos/`.
