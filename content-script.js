@@ -1,7 +1,6 @@
 const STORAGE_BLOCKED_PATHS_KEY = "blockedPaths";
 const STORAGE_TIMED_ACCESS_SITES_KEY = "timedAccessSites";
 const STORAGE_TIMED_ACCESS_SESSIONS_KEY = "timedAccessSessions";
-const STORAGE_TIMED_ACCESS_MOOD_LOG_KEY = "timedAccessMoodLog";
 const STORAGE_LEISURE_SITES_KEY = "leisureSites";
 
 let lastCheckedUrl = "";
@@ -187,7 +186,32 @@ function setTimedAccessModalMessage(modal, message) {
   }
 }
 
-function redirectToMotivationVideo() {
+function makeInterventionEvent(site, interventionType, choice, details = {}) {
+  const accessKey = site ? getTimedAccessKey(site) : details.accessKey;
+
+  return {
+    accessKey: accessKey || normalizeDomain(window.location.hostname),
+    url: window.location.href,
+    hostname: window.location.hostname,
+    interventionType,
+    choice,
+    ...details
+  };
+}
+
+function recordInterventionEvent(event) {
+  chrome.runtime.sendMessage({
+    action: "recordInterventionEvent",
+    event
+  }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
+function redirectToMotivationVideo(event) {
+  if (event) {
+    recordInterventionEvent(event);
+  }
   redirecting = true;
   chrome.runtime.sendMessage({ action: "redirectTabToVideo" }, (response) => {
     if (!response || !response.ok) {
@@ -359,6 +383,11 @@ function createLeisureModal(site, status) {
     confirmButton.disabled = true;
     exitButton.disabled = true;
     message.textContent = "Starting leisure timer...";
+    recordInterventionEvent(makeInterventionEvent(
+      site,
+      "leisure",
+      "leisure_started"
+    ));
     chrome.runtime.sendMessage({
       action: "startLeisure",
       accessKey: getTimedAccessKey(site)
@@ -370,7 +399,12 @@ function createLeisureModal(site, status) {
         return;
       }
       if (!response.available) {
-        redirectToMotivationVideo();
+        redirectToMotivationVideo(makeInterventionEvent(
+          site,
+          "leisure",
+          "motivation_chosen",
+          { label: "Allowance unavailable" }
+        ));
         return;
       }
       removeLeisureModal();
@@ -380,7 +414,14 @@ function createLeisureModal(site, status) {
       }
     });
   });
-  exitButton.addEventListener("click", redirectToMotivationVideo);
+  exitButton.addEventListener("click", () => {
+    redirectToMotivationVideo(makeInterventionEvent(
+      site,
+      "leisure",
+      "motivation_chosen",
+      { label: "No, motivate me" }
+    ));
+  });
 
   actions.append(confirmButton, exitButton);
   panel.append(title, body, target, remaining, actions, message);
@@ -442,35 +483,6 @@ async function enforceLeisureAccess() {
   }
 }
 
-async function recordTimedAccessMood(site, mood) {
-  const accessKey = getTimedAccessKey(site);
-  const entry = {
-    mood: mood.value,
-    label: mood.label,
-    accessKey,
-    url: window.location.href,
-    hostname: window.location.hostname,
-    createdAt: Date.now()
-  };
-
-  try {
-    const stored = await chrome.storage.local.get([
-      STORAGE_TIMED_ACCESS_MOOD_LOG_KEY
-    ]);
-    const moodLog = Array.isArray(stored[STORAGE_TIMED_ACCESS_MOOD_LOG_KEY])
-      ? stored[STORAGE_TIMED_ACCESS_MOOD_LOG_KEY]
-      : [];
-
-    await chrome.storage.local.set({
-      [STORAGE_TIMED_ACCESS_MOOD_LOG_KEY]: moodLog.concat(entry)
-    });
-  } catch (error) {
-    console.error("Failed to record timed access mood", error);
-  } finally {
-    redirectToMotivationVideo();
-  }
-}
-
 function styleActionButton(button, options = {}) {
   button.style.alignItems = "center";
   button.style.appearance = "none";
@@ -522,7 +534,15 @@ function createMoodButton(mood, site, buttons) {
     buttons.forEach((item) => {
       item.disabled = true;
     });
-    recordTimedAccessMood(site, mood);
+    redirectToMotivationVideo(makeInterventionEvent(
+      site,
+      "timed_access",
+      "reason",
+      {
+        reason: mood.value,
+        label: mood.label
+      }
+    ));
   });
 
   return button;
@@ -601,6 +621,15 @@ async function startTimedAccessFromModal(overlay, site, buttons) {
 
     removeTimedAccessModal();
     scheduleTimedAccessExpiryCheck(response.expiresAt);
+    recordInterventionEvent(makeInterventionEvent(
+      site,
+      "timed_access",
+      "work_confirmed",
+      {
+        reason: "legitimate_work",
+        label: "Yes, work"
+      }
+    ));
   } catch (error) {
     console.error("Failed to start timed access", error);
     setTimedAccessModalMessage(overlay, "Could not start timer. Reload extension and try again.");
@@ -675,7 +704,14 @@ function renderWorkConfirmModal(overlay, panel, site) {
       procrastinationButton
     ]);
   });
-  procrastinationButton.addEventListener("click", redirectToMotivationVideo);
+  procrastinationButton.addEventListener("click", () => {
+    redirectToMotivationVideo(makeInterventionEvent(
+      site,
+      "timed_access",
+      "procrastination",
+      { label: "No, procrastination" }
+    ));
+  });
 
   actions.append(confirmButton, procrastinationButton);
   panel.append(title, body, target, videoFrame, actions, message);
@@ -781,11 +817,32 @@ function createTimedAccessModal(site) {
       minWidth: "158px"
     },
     {
-      value: "scared_of_failure",
-      label: "Scared of failure?",
+      value: "anxious",
+      label: "Anxious?",
+      background: "#7c3aed",
+      color: "#fbf7ff",
+      minWidth: "128px"
+    },
+    {
+      value: "bored",
+      label: "Bored?",
+      background: "#0f766e",
+      color: "#f0fdfa",
+      minWidth: "118px"
+    },
+    {
+      value: "habit",
+      label: "Habit?",
+      background: "#475569",
+      color: "#f8fafc",
+      minWidth: "112px"
+    },
+    {
+      value: "avoiding_failure",
+      label: "Avoiding failure?",
       background: "#be123c",
       color: "#fff5f7",
-      minWidth: "190px"
+      minWidth: "186px"
     }
   ];
 
@@ -804,6 +861,15 @@ function createTimedAccessModal(site) {
   message.style.minHeight = "20px";
 
   workButton.addEventListener("click", () => {
+    recordInterventionEvent(makeInterventionEvent(
+      site,
+      "timed_access",
+      "work_intent",
+      {
+        reason: "legitimate_work",
+        label: "Work"
+      }
+    ));
     renderWorkConfirmModal(overlay, panel, site);
   });
 
@@ -915,12 +981,18 @@ async function enforceBlockedPath() {
     }
 
     if (matchesBlockedPath(window.location, blockedPaths)) {
-      redirecting = true;
-      chrome.runtime.sendMessage({ action: "redirectTabToVideo" }, (response) => {
-        if (!response || !response.ok) {
-          window.location.replace(chrome.runtime.getURL("video.html"));
+      const matchedPath = blockedPaths.find((path) =>
+        matchesBlockedPath(window.location, [path])
+      );
+      redirectToMotivationVideo(makeInterventionEvent(
+        matchedPath,
+        "blocked_path",
+        "blocked_redirect",
+        {
+          accessKey: matchedPath ? matchedPath.pattern : normalizeDomain(window.location.hostname),
+          label: "Blocked path redirect"
         }
-      });
+      ));
     }
   } catch (error) {
     console.error("Failed to enforce blocked path", error);

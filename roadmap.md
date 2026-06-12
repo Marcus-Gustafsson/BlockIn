@@ -20,3 +20,4 @@ Status markers: `Planned` or `Done`
 - `Done` - Added a second Work confirmation modal with optional random check-in videos.
 - `Done` - Added mood-specific timed access exit buttons with local mood context logging.
 - `Done` - Added popup-managed leisure sites with shared 15 minute morning, midday, and evening focus-aware budgets.
+- `Done` - Added local intervention tracking with popup trends, JSON/CSV export, and clear-log controls.

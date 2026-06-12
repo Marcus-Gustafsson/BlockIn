@@ -54,6 +54,50 @@
       padding: 8px 0;
     }
 
+    .stats-grid {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 1fr 1fr;
+      margin: 0 0 10px;
+    }
+
+    .stat {
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 8px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 18px;
+    }
+
+    .stat span {
+      color: #666;
+      font-size: 12px;
+    }
+
+    .analytics-block {
+      margin: 0 0 10px;
+    }
+
+    .analytics-block h3 {
+      font-size: 13px;
+      margin: 0 0 4px;
+    }
+
+    .analytics-list li {
+      align-items: flex-start;
+      display: block;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 12px;
+    }
+
     .domain {
       overflow-wrap: anywhere;
     }
@@ -87,6 +131,39 @@
   <h1>bLockIn</h1>
   <p>Manage sites that redirect to motivation videos.</p>
   <p id="status" class="status" role="status"></p>
+
+  <h2 class="section-title">Intervention Trends</h2>
+  <div class="stats-grid">
+    <div class="stat">
+      <strong id="interventions-today">0</strong>
+      <span>Today</span>
+    </div>
+    <div class="stat">
+      <strong id="interventions-week">0</strong>
+      <span>Last 7 days</span>
+    </div>
+  </div>
+  <div class="actions">
+    <button id="export-interventions-json" type="button">Export JSON</button>
+    <button id="export-interventions-csv" type="button">Export CSV</button>
+    <button id="clear-interventions" type="button">Clear Log</button>
+  </div>
+  <div class="analytics-block">
+    <h3>Top Hours</h3>
+    <ul id="top-hours" class="analytics-list"></ul>
+  </div>
+  <div class="analytics-block">
+    <h3>Top Sites / Paths</h3>
+    <ul id="top-targets" class="analytics-list"></ul>
+  </div>
+  <div class="analytics-block">
+    <h3>Top Reasons / Choices</h3>
+    <ul id="top-reasons" class="analytics-list"></ul>
+  </div>
+  <div class="analytics-block">
+    <h3>Recent Events</h3>
+    <ul id="recent-interventions" class="analytics-list"></ul>
+  </div>
 
   <h2 class="section-title">Blocked Sites</h2>
   <form id="add-site-form">

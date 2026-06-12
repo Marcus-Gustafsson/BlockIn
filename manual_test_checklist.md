@@ -79,6 +79,18 @@ Use this after changes that affect blocking, videos, popup behavior, or permissi
 - Reload extension or restart Brave and confirm remaining current-period allowance persists without continuing to drain while inactive.
 - Remove leisure targets and confirm they stop showing leisure prompts.
 
+## Intervention Tracking
+
+- Open the popup and confirm the Intervention Trends section shows Today, Last 7 days, top lists, recent events, and export/clear buttons.
+- Visit a fully blocked site such as `https://www.facebook.com/` and confirm a `blocked_redirect` event appears in Recent Events after opening the popup.
+- Add `youtube.com` as a timed access site, visit it, choose a reason such as `Tired?`, and confirm the reason, site, and current time appear in the popup trends.
+- Visit the timed access site again, click `Work`, then click `Yes, work`, and confirm `work_intent` and `work_confirmed` entries appear with `legitimate_work`.
+- Open a leisure target, choose `No, motivate me`, and confirm a `motivation_chosen` event appears.
+- Open a leisure target again, choose `Yes, use leisure time`, and confirm a `leisure_started` event appears.
+- Click `Export JSON` and `Export CSV`, then confirm both downloaded files include the same recent intervention entries.
+- Click `Clear Log`, cancel once, then confirm once and verify Today, Last 7 days, top lists, and Recent Events reset.
+- If `chrome.storage.local.timedAccessMoodLog` exists from an older build, reload the extension and confirm old mood entries appear in `interventionLog` without deleting the old key.
+
 ## Videos
 
 - Confirm a random local video loads from `videos/`.

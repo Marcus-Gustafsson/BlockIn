@@ -20,3 +20,4 @@ Format: `YYYY-MM-DD - One sentence summary.`
 2026-05-20 - Capped the blocked-page motivation video player to a consistent viewport-safe size.
 2026-05-26 - Added timed access mood buttons that log the selected mood and page context before opening a motivation video.
 2026-06-11 - Added shared focus-aware leisure budgets for morning, midday, and evening leisure sites and paths.
+2026-06-12 - Added local intervention tracking with popup summaries, export, and clear-log controls.

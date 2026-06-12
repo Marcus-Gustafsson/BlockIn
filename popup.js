@@ -4,6 +4,7 @@ const STORAGE_BLOCKED_PATHS_KEY = "blockedPaths";
 const STORAGE_TIMED_ACCESS_SITES_KEY = "timedAccessSites";
 const STORAGE_TIMED_ACCESS_SESSIONS_KEY = "timedAccessSessions";
 const STORAGE_LEISURE_SITES_KEY = "leisureSites";
+const STORAGE_INTERVENTION_LOG_KEY = "interventionLog";
 const STORAGE_NEXT_RULE_ID_KEY = "nextBlockedSiteRuleId";
 const DEFAULT_WORK_DURATION_MINUTES = 10;
 
@@ -24,6 +25,16 @@ const blockedPathsList = document.getElementById("blocked-paths");
 const timedSitesList = document.getElementById("timed-sites");
 const leisureSitesList = document.getElementById("leisure-sites");
 const leisurePeriodStatus = document.getElementById("leisure-period-status");
+const interventionsTodayElement = document.getElementById("interventions-today");
+const interventionsWeekElement = document.getElementById("interventions-week");
+const topHoursList = document.getElementById("top-hours");
+const topTargetsList = document.getElementById("top-targets");
+const topReasonsList = document.getElementById("top-reasons");
+const recentInterventionsList = document.getElementById("recent-interventions");
+const exportInterventionsJsonButton = document.getElementById("export-interventions-json");
+const exportInterventionsCsvButton = document.getElementById("export-interventions-csv");
+const clearInterventionsButton = document.getElementById("clear-interventions");
+let interventionLogMigrationRequested = false;
 
 function normalizeDomain(value) {
   const trimmed = value.trim().toLowerCase();
@@ -138,6 +149,11 @@ function makeWorkUrl(domain) {
 }
 
 async function getStoredState() {
+  if (!interventionLogMigrationRequested) {
+    interventionLogMigrationRequested = true;
+    await chrome.runtime.sendMessage({ action: "migrateInterventionLog" });
+  }
+
   const stored = await chrome.storage.local.get([
     STORAGE_BLOCKED_SITES_KEY,
     STORAGE_ALLOWED_PATHS_KEY,
@@ -145,6 +161,7 @@ async function getStoredState() {
     STORAGE_TIMED_ACCESS_SITES_KEY,
     STORAGE_TIMED_ACCESS_SESSIONS_KEY,
     STORAGE_LEISURE_SITES_KEY,
+    STORAGE_INTERVENTION_LOG_KEY,
     STORAGE_NEXT_RULE_ID_KEY
   ]);
   const blockedSites = Array.isArray(stored[STORAGE_BLOCKED_SITES_KEY])
@@ -165,6 +182,9 @@ async function getStoredState() {
   const leisureSites = Array.isArray(stored[STORAGE_LEISURE_SITES_KEY])
     ? stored[STORAGE_LEISURE_SITES_KEY]
     : [];
+  const interventionLog = Array.isArray(stored[STORAGE_INTERVENTION_LOG_KEY])
+    ? stored[STORAGE_INTERVENTION_LOG_KEY]
+    : [];
   const leisureStatus = await chrome.runtime.sendMessage({ action: "getLeisureStatus" });
   const nextAvailableRuleId =
     Math.max(
@@ -183,6 +203,7 @@ async function getStoredState() {
     timedAccessSites,
     timedAccessSessions,
     leisureSites,
+    interventionLog,
     leisureStatus,
     nextRuleId: Number.isInteger(stored[STORAGE_NEXT_RULE_ID_KEY])
       ? Math.max(stored[STORAGE_NEXT_RULE_ID_KEY], nextAvailableRuleId)
@@ -269,6 +290,191 @@ function formatRemainingTime(milliseconds) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function getLocalDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatHour(hour) {
+  const normalizedHour = Number.isInteger(hour) ? hour : 0;
+  return `${String(normalizedHour).padStart(2, "0")}:00`;
+}
+
+function formatEventTime(createdAt) {
+  if (!Number.isFinite(createdAt)) {
+    return "Unknown time";
+  }
+
+  return new Date(createdAt).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatEventLabel(entry) {
+  if (entry.label) {
+    return entry.label;
+  }
+
+  if (entry.reason) {
+    return entry.reason.replace(/_/g, " ");
+  }
+
+  return (entry.choice || "unknown").replace(/_/g, " ");
+}
+
+function incrementCount(counts, key) {
+  if (!key) {
+    return;
+  }
+
+  counts.set(key, (counts.get(key) || 0) + 1);
+}
+
+function getTopCounts(entries, getKey, limit) {
+  const counts = new Map();
+  entries.forEach((entry) => incrementCount(counts, getKey(entry)));
+
+  return Array.from(counts.entries())
+    .sort((first, second) => second[1] - first[1] || first[0].localeCompare(second[0]))
+    .slice(0, limit);
+}
+
+function renderCountList(list, items, emptyText) {
+  list.textContent = "";
+
+  if (items.length === 0) {
+    const emptyItem = document.createElement("li");
+    emptyItem.className = "empty";
+    emptyItem.textContent = emptyText;
+    list.append(emptyItem);
+    return;
+  }
+
+  items.forEach(([label, count]) => {
+    const item = document.createElement("li");
+    const strong = document.createElement("span");
+    const meta = document.createElement("span");
+
+    strong.className = "domain";
+    strong.textContent = label;
+    meta.className = "meta";
+    meta.textContent = `${count} event${count === 1 ? "" : "s"}`;
+
+    item.append(strong, meta);
+    list.append(item);
+  });
+}
+
+function renderRecentEvents(list, entries) {
+  list.textContent = "";
+
+  if (entries.length === 0) {
+    const emptyItem = document.createElement("li");
+    emptyItem.className = "empty";
+    emptyItem.textContent = "No interventions logged yet.";
+    list.append(emptyItem);
+    return;
+  }
+
+  entries.slice(0, 5).forEach((entry) => {
+    const item = document.createElement("li");
+    const label = document.createElement("span");
+    const meta = document.createElement("span");
+
+    label.className = "domain";
+    label.textContent = `${formatEventLabel(entry)} - ${entry.accessKey || entry.hostname || "unknown target"}`;
+    meta.className = "meta";
+    meta.textContent = `${formatEventTime(entry.createdAt)} - ${(entry.interventionType || "unknown").replace(/_/g, " ")}`;
+
+    item.append(label, meta);
+    list.append(item);
+  });
+}
+
+function renderInterventionAnalytics(entries) {
+  const sortedEntries = entries
+    .filter((entry) => entry && Number.isFinite(entry.createdAt))
+    .slice()
+    .sort((first, second) => second.createdAt - first.createdAt);
+  const todayKey = getLocalDateKey();
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const todayCount = sortedEntries.filter((entry) => entry.localDate === todayKey).length;
+  const weekCount = sortedEntries.filter((entry) => entry.createdAt >= sevenDaysAgo).length;
+
+  interventionsTodayElement.textContent = String(todayCount);
+  interventionsWeekElement.textContent = String(weekCount);
+
+  renderCountList(
+    topHoursList,
+    getTopCounts(sortedEntries, (entry) => formatHour(entry.localHour), 3),
+    "No hour trends yet."
+  );
+  renderCountList(
+    topTargetsList,
+    getTopCounts(sortedEntries, (entry) => entry.accessKey || entry.hostname, 3),
+    "No site trends yet."
+  );
+  renderCountList(
+    topReasonsList,
+    getTopCounts(sortedEntries, (entry) => entry.reason || entry.choice, 3)
+      .map(([label, count]) => [label.replace(/_/g, " "), count]),
+    "No reason trends yet."
+  );
+  renderRecentEvents(recentInterventionsList, sortedEntries);
+}
+
+function getExportDate() {
+  return getLocalDateKey();
+}
+
+function downloadTextFile(fileName, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 0);
+}
+
+function escapeCsvValue(value) {
+  const text = value === undefined || value === null ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function convertInterventionsToCsv(entries) {
+  const columns = [
+    "id",
+    "createdAt",
+    "localDate",
+    "localHour",
+    "localDay",
+    "url",
+    "hostname",
+    "accessKey",
+    "interventionType",
+    "choice",
+    "reason",
+    "label"
+  ];
+  const rows = entries.map((entry) =>
+    columns.map((column) => escapeCsvValue(entry[column])).join(",")
+  );
+
+  return [columns.join(","), ...rows].join("\n");
+}
+
 function getActiveTimedAccessSession(accessKey, sessions) {
   const now = Date.now();
   return (
@@ -295,6 +501,8 @@ function getTimedAccessMeta(site, sessions) {
 }
 
 function renderSites(state) {
+  renderInterventionAnalytics(state.interventionLog);
+
   renderList(
     sitesList,
     state.blockedSites,
@@ -716,6 +924,41 @@ leisureSitesList.addEventListener("click", async (event) => {
   renderSites(updatedState);
 });
 
+exportInterventionsJsonButton.addEventListener("click", async () => {
+  const state = await getStoredState();
+  downloadTextFile(
+    `blockin-intervention-log-${getExportDate()}.json`,
+    JSON.stringify(state.interventionLog, null, 2),
+    "application/json"
+  );
+  setStatus("Intervention log exported as JSON.");
+});
+
+exportInterventionsCsvButton.addEventListener("click", async () => {
+  const state = await getStoredState();
+  downloadTextFile(
+    `blockin-intervention-log-${getExportDate()}.csv`,
+    convertInterventionsToCsv(state.interventionLog),
+    "text/csv"
+  );
+  setStatus("Intervention log exported as CSV.");
+});
+
+clearInterventionsButton.addEventListener("click", async () => {
+  const confirmed = confirm("Clear all local intervention tracking entries?");
+  if (!confirmed) {
+    setStatus("Intervention log kept.");
+    return;
+  }
+
+  await chrome.storage.local.set({
+    [STORAGE_INTERVENTION_LOG_KEY]: []
+  });
+  const state = await getStoredState();
+  setStatus("Intervention log cleared.");
+  renderSites(state);
+});
+
 loadAndRender().catch((error) => {
   console.error("Failed to load popup state", error);
   setStatus("Could not load blocked sites.");
@@ -732,7 +975,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     areaName === "local" &&
     (changes[STORAGE_TIMED_ACCESS_SITES_KEY] ||
       changes[STORAGE_TIMED_ACCESS_SESSIONS_KEY] ||
-      changes[STORAGE_LEISURE_SITES_KEY])
+      changes[STORAGE_LEISURE_SITES_KEY] ||
+      changes[STORAGE_INTERVENTION_LOG_KEY])
   ) {
     getStoredState()
       .then(renderSites)

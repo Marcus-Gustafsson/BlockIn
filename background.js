@@ -8,6 +8,9 @@ const STORAGE_ALLOWED_PATHS_KEY = "allowedPaths";
 const STORAGE_BLOCKED_PATHS_KEY = "blockedPaths";
 const STORAGE_TIMED_ACCESS_SITES_KEY = "timedAccessSites";
 const STORAGE_TIMED_ACCESS_SESSIONS_KEY = "timedAccessSessions";
+const STORAGE_TIMED_ACCESS_MOOD_LOG_KEY = "timedAccessMoodLog";
+const STORAGE_INTERVENTION_LOG_KEY = "interventionLog";
+const STORAGE_INTERVENTION_LOG_MIGRATED_KEY = "interventionLogMigratedFromMoodLog";
 const STORAGE_LEISURE_SITES_KEY = "leisureSites";
 const STORAGE_LEISURE_PERIOD_STATE_KEY = "leisurePeriodState";
 const STORAGE_NEXT_RULE_ID_KEY = "nextBlockedSiteRuleId";
@@ -15,10 +18,17 @@ const DEFAULT_WORK_DURATION_MINUTES = 10;
 const LEISURE_PERIOD_BUDGET_MS = 15 * 60 * 1000;
 const LEISURE_HEARTBEAT_STALE_MS = 3000;
 let leisureOperationQueue = Promise.resolve();
+let interventionLogQueue = Promise.resolve();
 
 function queueLeisureOperation(operation) {
   const result = leisureOperationQueue.then(operation, operation);
   leisureOperationQueue = result.catch(() => {});
+  return result;
+}
+
+function queueInterventionLogOperation(operation) {
+  const result = interventionLogQueue.then(operation, operation);
+  interventionLogQueue = result.catch(() => {});
   return result;
 }
 
@@ -127,6 +137,113 @@ function getTimedAccessKey(site) {
 
 function getAccessKey(site) {
   return site.pattern || site.domain;
+}
+
+function getLocalDateFields(createdAt) {
+  const date = new Date(createdAt);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return {
+    localDate: `${year}-${month}-${day}`,
+    localHour: date.getHours(),
+    localDay: date.getDay()
+  };
+}
+
+function sanitizeInterventionEvent(event, fallbackId = Date.now()) {
+  const createdAt = Number.isFinite(event.createdAt) ? event.createdAt : Date.now();
+  const localFields = getLocalDateFields(createdAt);
+
+  return {
+    id: event.id || `${createdAt}-${fallbackId}`,
+    createdAt,
+    ...localFields,
+    url: typeof event.url === "string" ? event.url : "",
+    hostname: typeof event.hostname === "string" ? event.hostname : "",
+    accessKey: typeof event.accessKey === "string" ? event.accessKey : "",
+    interventionType: typeof event.interventionType === "string"
+      ? event.interventionType
+      : "unknown",
+    choice: typeof event.choice === "string" ? event.choice : "unknown",
+    ...(typeof event.reason === "string" ? { reason: event.reason } : {}),
+    ...(typeof event.label === "string" ? { label: event.label } : {})
+  };
+}
+
+function migrateMoodEntry(entry, index) {
+  const reason = entry.mood === "scared_of_failure"
+    ? "avoiding_failure"
+    : entry.mood;
+
+  return sanitizeInterventionEvent({
+    id: entry.id,
+    createdAt: entry.createdAt,
+    url: entry.url,
+    hostname: entry.hostname,
+    accessKey: entry.accessKey,
+    interventionType: "timed_access",
+    choice: "reason",
+    reason,
+    label: entry.label
+  }, index);
+}
+
+async function migrateTimedAccessMoodLogIfNeeded() {
+  const stored = await getFromStorage([
+    STORAGE_TIMED_ACCESS_MOOD_LOG_KEY,
+    STORAGE_INTERVENTION_LOG_KEY,
+    STORAGE_INTERVENTION_LOG_MIGRATED_KEY
+  ]);
+
+  if (stored[STORAGE_INTERVENTION_LOG_MIGRATED_KEY]) {
+    return;
+  }
+
+  const moodLog = Array.isArray(stored[STORAGE_TIMED_ACCESS_MOOD_LOG_KEY])
+    ? stored[STORAGE_TIMED_ACCESS_MOOD_LOG_KEY]
+    : [];
+  const interventionLog = Array.isArray(stored[STORAGE_INTERVENTION_LOG_KEY])
+    ? stored[STORAGE_INTERVENTION_LOG_KEY]
+    : [];
+
+  if (moodLog.length === 0) {
+    await chrome.storage.local.set({
+      [STORAGE_INTERVENTION_LOG_MIGRATED_KEY]: true
+    });
+    return;
+  }
+
+  const existingIds = new Set(interventionLog.map((entry) => entry && entry.id));
+  const migratedEntries = moodLog
+    .map(migrateMoodEntry)
+    .filter((entry) => !existingIds.has(entry.id));
+
+  await chrome.storage.local.set({
+    [STORAGE_INTERVENTION_LOG_KEY]: interventionLog.concat(migratedEntries),
+    [STORAGE_INTERVENTION_LOG_MIGRATED_KEY]: true
+  });
+}
+
+async function appendInterventionEvent(event) {
+  await migrateTimedAccessMoodLogIfNeeded();
+
+  const stored = await getFromStorage([STORAGE_INTERVENTION_LOG_KEY]);
+  const interventionLog = Array.isArray(stored[STORAGE_INTERVENTION_LOG_KEY])
+    ? stored[STORAGE_INTERVENTION_LOG_KEY]
+    : [];
+  const nextEntry = sanitizeInterventionEvent(event, interventionLog.length + 1);
+
+  await chrome.storage.local.set({
+    [STORAGE_INTERVENTION_LOG_KEY]: interventionLog.concat(nextEntry)
+  });
+
+  return nextEntry;
+}
+
+function recordInterventionEvent(event) {
+  return queueInterventionLogOperation(() => appendInterventionEvent(event));
 }
 
 function getLeisurePeriod(now = new Date()) {
@@ -540,13 +657,65 @@ async function activateTimedAccess(domain) {
   };
 }
 
+async function recordDnrRedirect(matchInfo) {
+  if (
+    !matchInfo ||
+    !matchInfo.rule ||
+    !Number.isInteger(matchInfo.rule.ruleId) ||
+    !matchInfo.request ||
+    matchInfo.request.type !== "main_frame"
+  ) {
+    return;
+  }
+
+  const state = await seedStoredRulesIfMissing();
+  const ruleId = matchInfo.rule.ruleId;
+  const blockedSite = state.blockedSites.find((site) => site.id === ruleId);
+  const blockedPath = state.blockedPaths.find((path) => path.id === ruleId);
+  const target = blockedSite || blockedPath;
+
+  if (!target) {
+    return;
+  }
+
+  let hostname = "";
+  try {
+    hostname = new URL(matchInfo.request.url).hostname;
+  } catch (error) {
+    hostname = "";
+  }
+
+  await recordInterventionEvent({
+    url: matchInfo.request.url,
+    hostname,
+    accessKey: blockedPath ? blockedPath.pattern : blockedSite.domain,
+    interventionType: blockedPath ? "blocked_path" : "blocked_site",
+    choice: "blocked_redirect",
+    label: blockedPath ? "Blocked path redirect" : "Blocked site redirect"
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => {
+  migrateTimedAccessMoodLogIfNeeded().catch((error) => {
+    console.error("Failed to migrate timed access mood log", error);
+  });
   syncDynamicRules("installed or updated");
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  migrateTimedAccessMoodLogIfNeeded().catch((error) => {
+    console.error("Failed to migrate timed access mood log", error);
+  });
   syncDynamicRules("browser startup");
 });
+
+if (chrome.declarativeNetRequest.onRuleMatchedDebug) {
+  chrome.declarativeNetRequest.onRuleMatchedDebug.addListener((matchInfo) => {
+    recordDnrRedirect(matchInfo).catch((error) => {
+      console.error("Failed to record DNR redirect", error);
+    });
+  });
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !message.action) {
@@ -569,6 +738,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((response) => sendResponse(response))
       .catch((error) => {
         console.error("Timed access start failed", error);
+        sendResponse({ ok: false, error: error.message });
+      });
+
+    return true;
+  }
+
+  if (message.action === "recordInterventionEvent") {
+    recordInterventionEvent(message.event || {})
+      .then((entry) => sendResponse({ ok: true, entry }))
+      .catch((error) => {
+        console.error("Intervention logging failed", error);
+        sendResponse({ ok: false, error: error.message });
+      });
+
+    return true;
+  }
+
+  if (message.action === "migrateInterventionLog") {
+    migrateTimedAccessMoodLogIfNeeded()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => {
+        console.error("Intervention log migration failed", error);
         sendResponse({ ok: false, error: error.message });
       });
 

@@ -5,6 +5,7 @@
   "description": "Plays a video when a certain web address is entered.",
   "permissions": [
     "declarativeNetRequest",
+    "declarativeNetRequestFeedback",
     "declarativeNetRequestWithHostAccess",
     "storage"
   ],
